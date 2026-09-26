@@ -4,7 +4,7 @@
  "docstatus": 0,
  "doctype": "Page",
  "idx": 0,
- "modified": "2026-09-26 12:00:00.000000",
+ "modified": "2026-09-27 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "MCP Connector",
  "name": "mcp-console",
@@ -12,10 +12,7 @@
  "page_name": "MCP Console",
  "roles": [
   {
-   "role": "System Manager"
-  },
-  {
-   "role": "MCP Manager"
+   "role": "Administrator"
   }
  ],
  "script": null,

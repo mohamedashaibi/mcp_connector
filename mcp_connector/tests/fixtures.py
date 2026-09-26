@@ -17,6 +17,8 @@ SALES_USER = "mcp-sales@example.com"
 VIEWER_USER = "mcp-viewer@example.com"
 ORPHAN_USER = "mcp-orphan@example.com"
 CAPPED_USER = "mcp-capped@example.com"
+SYSTEM_MANAGER_USER = "mcp-sysmanager@example.com"
+SYSTEM_MANAGER_PASSWORD = "Mcp#Locked-Out-2026"  # development fixture only
 
 ORDER = "MCP Test Order"
 ORDER_ITEM = "MCP Test Order Item"
@@ -51,6 +53,22 @@ def ensure_users():
 			)
 			user.append("roles", {"role": role})
 			user.insert(ignore_permissions=True)
+
+
+def ensure_system_manager():
+	"""A System Manager who is not the Administrator: must never see or manage the connector."""
+	if not frappe.db.exists("User", SYSTEM_MANAGER_USER):
+		user = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": SYSTEM_MANAGER_USER,
+				"first_name": "Sam Sysmanager",
+				"send_welcome_email": 0,
+				"new_password": SYSTEM_MANAGER_PASSWORD,
+			}
+		)
+		user.append("roles", {"role": "System Manager"})
+		user.insert(ignore_permissions=True)
 
 
 def _perm(role, **flags):
@@ -213,6 +231,7 @@ def ensure_all():
 	frappe.set_user("Administrator")
 	ensure_roles()
 	ensure_users()
+	ensure_system_manager()
 	ensure_doctypes()
 	ensure_workflow()
 	ensure_report()

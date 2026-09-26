@@ -15,10 +15,14 @@ class TestInstallation(McpTestCase):
 		standard = set(frappe.get_all("MCP Action", filters={"is_standard": 1}, pluck="name"))
 		self.assertEqual(standard, {t.name for t in BUILTIN_TOOLS})
 
-	def test_manager_role_page_and_workspace_exist(self):
-		self.assertTrue(frappe.db.exists("Role", "MCP Manager"))
-		self.assertTrue(frappe.db.exists("Page", "mcp-console"))
-		self.assertTrue(frappe.db.exists("Workspace", "MCP Connector"))
+	def test_management_is_granted_to_the_administrator_only(self):
+		from mcp_connector.infrastructure.permissions import ADMIN_ONLY_DOCTYPES
+
+		self.assertFalse(frappe.db.exists("Role", "MCP Manager"))
+		for doctype in ADMIN_ONLY_DOCTYPES:
+			self.assertEqual({p.role for p in frappe.get_meta(doctype).permissions}, {"Administrator"}, doctype)
+		self.assertEqual([r.role for r in frappe.get_doc("Page", "mcp-console").roles], ["Administrator"])
+		self.assertEqual([r.role for r in frappe.get_doc("Workspace", "MCP Connector").roles], ["Administrator"])
 
 	def test_settings_defaults(self):
 		settings = load_settings()

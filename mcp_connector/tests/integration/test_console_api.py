@@ -9,7 +9,7 @@ from mcp_connector.tests import fixtures
 from mcp_connector.tests.integration.base import McpTestCase
 
 F = fixtures
-MANAGER = "mcp-manager-only@example.com"
+SYSMAN = F.SYSTEM_MANAGER_USER
 
 
 class TestConsoleApi(McpTestCase):
@@ -17,10 +17,6 @@ class TestConsoleApi(McpTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user("Administrator")
-		if not frappe.db.exists("User", MANAGER):
-			user = frappe.get_doc({"doctype": "User", "email": MANAGER, "first_name": "Manny", "send_welcome_email": 0})
-			user.append("roles", {"role": "MCP Manager"})
-			user.insert(ignore_permissions=True)
 		cls.make_profile(
 			"Console Sales",
 			roles=[F.SALES_ROLE],
@@ -72,23 +68,63 @@ class TestConsoleApi(McpTestCase):
 		reports = {r["name"]: r for r in console.report_catalog()}
 		self.assertEqual(reports[F.REPORT]["report_type"], "Query Report")
 
-	def test_endpoints_require_manager_role(self):
-		frappe.set_user(F.SALES_USER)
-		for call in (
-			console.bootstrap,
-			console.doctype_catalog,
-			lambda: console.get_profile("Console Sales"),
-			lambda: console.inspect_user(F.SALES_USER),
-		):
-			with self.assertRaises(frappe.PermissionError):
-				call()
+	def test_only_the_administrator_may_use_the_console(self):
+		self.assertIn("profiles", console.bootstrap())  # positive control
+		for user in (SYSMAN, F.SALES_USER):
+			frappe.set_user(user)
+			for call in (
+				console.bootstrap,
+				console.doctype_catalog,
+				lambda: console.get_profile("Console Sales"),
+				lambda: console.inspect_user(F.SALES_USER),
+				lambda: console.save_settings("{}"),
+				lambda: console.generate_keys(F.SALES_USER),
+			):
+				with self.assertRaises(frappe.PermissionError, msg=user):
+					call()
+		frappe.set_user("Administrator")
 
-	def test_mcp_manager_can_manage_but_not_generate_keys(self):
-		frappe.set_user(MANAGER)
-		self.assertIn("profiles", console.bootstrap())
-		self.assertFalse(console.bootstrap()["can_generate_keys"])
-		with self.assertRaises(frappe.PermissionError):
-			console.generate_keys(F.SALES_USER)
+	def test_system_manager_cannot_see_workspace_page_or_records(self):
+		from frappe.desk.desktop import get_workspace_sidebar_items
+
+		sidebar = lambda: [p.get("name") for p in get_workspace_sidebar_items()["pages"]]
+		self.assertIn("MCP Connector", sidebar())  # positive control: the Administrator sees it
+		self.assertTrue(frappe.get_doc("Page", "mcp-console").is_permitted())
+		profile = frappe.get_doc("MCP Profile", "Console Sales")
+		frappe.set_user(SYSMAN)
+		try:
+			self.assertNotIn("MCP Connector", sidebar())
+			self.assertFalse(frappe.get_doc("Page", "mcp-console").is_permitted())
+			for doctype in ("MCP Profile", "MCP Settings", "MCP Action", "MCP Audit Log"):
+				self.assertFalse(frappe.has_permission(doctype, "read"), doctype)
+			self.assertFalse(frappe.has_permission("MCP Profile", "write", doc=profile))
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_widening_role_permissions_does_not_let_system_managers_in(self):
+		profile = frappe.get_doc("MCP Profile", "Console Sales")
+		frappe.get_doc(
+			{
+				"doctype": "Custom DocPerm",
+				"parent": "MCP Profile",
+				"parenttype": "DocType",
+				"parentfield": "permissions",
+				"role": "System Manager",
+				"permlevel": 0,
+				"read": 1,
+				"write": 1,
+			}
+		).insert(ignore_permissions=True)
+		frappe.clear_cache(doctype="MCP Profile")
+		frappe.set_user(SYSMAN)
+		try:
+			self.assertFalse(frappe.has_permission("MCP Profile", "read", doc=profile))
+			self.assertFalse(frappe.has_permission("MCP Profile", "write", doc=profile))
+			self.assertEqual(frappe.get_list("MCP Profile"), [])
+		finally:
+			frappe.set_user("Administrator")
+			frappe.db.delete("Custom DocPerm", {"parent": "MCP Profile"})
+			frappe.clear_cache(doctype="MCP Profile")
 
 	def test_bootstrap(self):
 		data = console.bootstrap()
@@ -194,15 +230,6 @@ class TestConsoleApi(McpTestCase):
 		detail = console.log_detail(logs["rows"][0]["name"])
 		self.assertEqual(detail["user"], F.SALES_USER)
 		self.assertTrue(detail["arguments"])
-		frappe.set_user(MANAGER)
-		redacted = console.log_detail(logs["rows"][0]["name"])
-		self.assertIsNone(redacted["arguments"])
-		self.assertTrue(redacted["details_hidden"])
-		self.call(F.SALES_USER, "create_document", doctype=F.ORDER, data={"company": "ACME"})  # fails: missing customer
-		frappe.set_user(MANAGER)
-		failed = console.logs(json.dumps({"user": F.SALES_USER, "status": "Error", "hours": 1}))["rows"]
-		self.assertTrue(failed and all(not row["error"] for row in failed))
-		frappe.set_user("Administrator")
 		dash = console.dashboard(24)
 		self.assertGreaterEqual(dash["total"], 1)
 		self.assertEqual(len(dash["series"]["labels"]), 24)

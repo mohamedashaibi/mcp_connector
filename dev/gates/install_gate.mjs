@@ -43,7 +43,17 @@ try {
 	for (const dt of DOCTYPES) if (!doctypes.includes(dt)) failures.push(`missing DocType ${dt}`);
 	if (!siteQuery("frappe.db.exists", { dt: "Page", dn: "mcp-console" })) failures.push("console page missing");
 	if (!siteQuery("frappe.db.exists", { dt: "Workspace", dn: "MCP Connector" })) failures.push("workspace missing");
-	if (!siteQuery("frappe.db.exists", { dt: "Role", dn: "MCP Manager" })) failures.push("MCP Manager role missing");
+	if (siteQuery("frappe.db.exists", { dt: "Role", dn: "MCP Manager" })) failures.push("the legacy MCP Manager role must not exist");
+	const ADMIN_ONLY = ["MCP Settings", "MCP Profile", "MCP Action", "MCP Audit Log"];
+	const perms = siteQuery("frappe.get_all", { doctype: "DocPerm", filters: { parent: ["in", ADMIN_ONLY] }, fields: ["parent", "role"], limit_page_length: 0 }) || [];
+	for (const dt of ADMIN_ONLY) {
+		const roles = [...new Set(perms.filter((p) => p.parent === dt).map((p) => p.role))];
+		if (JSON.stringify(roles) !== JSON.stringify(["Administrator"])) failures.push(`${dt} permissions should name only Administrator, got ${JSON.stringify(roles)}`);
+	}
+	for (const [parenttype, parent] of [["Page", "mcp-console"], ["Workspace", "MCP Connector"]]) {
+		const roles = siteQuery("frappe.get_all", { doctype: "Has Role", filters: { parenttype, parent }, pluck: "role" }) || [];
+		if (JSON.stringify(roles) !== JSON.stringify(["Administrator"])) failures.push(`${parenttype} ${parent} roles should be only Administrator, got ${JSON.stringify(roles)}`);
+	}
 
 	const actions = siteQuery("frappe.get_all", { doctype: "MCP Action", filters: { is_standard: 1, enabled: 1 }, pluck: "name" }) || [];
 	const missing = STANDARD.filter((a) => !actions.includes(a));
@@ -61,4 +71,4 @@ if (failures.length) {
 	console.error(`install gate failed:\n- ${failures.join("\n- ")}`);
 	process.exit(1);
 }
-console.log(`INSTALL GATE PASSED (${DOCTYPES.length} doctypes, page, workspace, role, ${STANDARD.length} standard actions; migrate idempotent)`);
+console.log(`INSTALL GATE PASSED (${DOCTYPES.length} doctypes, page, workspace, Administrator-only access, ${STANDARD.length} standard actions; migrate idempotent)`);

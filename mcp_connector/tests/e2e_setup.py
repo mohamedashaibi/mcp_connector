@@ -118,6 +118,14 @@ def setup():
 	}
 
 
+def locked_out_user():
+	"""Credentials of a System Manager (not Administrator) for the UI gate's lockout check."""
+	frappe.only_for("System Manager")
+	F.ensure_system_manager()
+	frappe.db.commit()
+	return {"user": F.SYSTEM_MANAGER_USER, "password": F.SYSTEM_MANAGER_PASSWORD}
+
+
 def set_enabled(enabled):
 	frappe.only_for("System Manager")
 	settings = frappe.get_single("MCP Settings")

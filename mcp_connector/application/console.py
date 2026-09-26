@@ -395,20 +395,12 @@ class SaveSettings:
 		return self.settings.get()
 
 
-def _redact_entry(entry: dict) -> dict:
-	"""Arguments and error text can quote record values the viewer may have no ERPNext access to."""
-	hidden = {k: None for k in ("arguments", "error") if entry.get(k)}
-	return {**entry, **hidden, "details_hidden": bool(hidden)} if hidden else entry
-
-
 class SearchLogs:
 	def __init__(self, audit: AuditQuery):
 		self.audit = audit
 
-	def execute(self, query: LogQuery, include_details: bool = True) -> dict:
+	def execute(self, query: LogQuery) -> dict:
 		rows = self.audit.search(query)
-		if not include_details:
-			rows = [_redact_entry(r) for r in rows]
 		return {"rows": rows[: query.limit], "has_more": len(rows) > query.limit, "start": query.start}
 
 
@@ -416,11 +408,11 @@ class GetLog:
 	def __init__(self, audit: AuditQuery):
 		self.audit = audit
 
-	def execute(self, name: str, include_details: bool) -> dict:
+	def execute(self, name: str) -> dict:
 		entry = self.audit.get(name)
 		if entry is None:
 			raise NotFound("Audit log entry not found")
-		return entry if include_details else _redact_entry(entry)
+		return entry
 
 
 class GenerateKeys:

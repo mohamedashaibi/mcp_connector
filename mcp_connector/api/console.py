@@ -1,7 +1,8 @@
 """Whitelisted endpoints for the MCP Console page.
 
-Each endpoint checks the manager roles itself (never relying on the page's
-role list), parses its payload through a strict DTO, and delegates to one use case.
+Only the Administrator may use them. Each endpoint checks that itself (never
+relying on the page's role list), parses its payload through a strict DTO, and
+delegates to one use case.
 """
 
 import frappe
@@ -22,22 +23,12 @@ from mcp_connector.infrastructure.console_repos import (
 	doctype_flags,
 )
 from mcp_connector.infrastructure.gateway import LAYOUT_TYPES, FrappeErpGateway
-
-MANAGER_ROLES = ("System Manager", "MCP Manager")
-
-
-def _require_roles(roles) -> None:
-	# Explicit on purpose: frappe.only_for() is a no-op under test and for Administrator.
-	if frappe.session.user == "Guest" or not set(roles).intersection(frappe.get_roles()):
-		raise frappe.PermissionError(_("You need one of these roles: {0}").format(", ".join(roles)))
-
+from mcp_connector.infrastructure.permissions import is_administrator
 
 def _require_manager():
-	_require_roles(MANAGER_ROLES)
-
-
-def _is_system_manager() -> bool:
-	return "System Manager" in frappe.get_roles()
+	# Explicit on purpose: frappe.only_for() is skipped under tests.
+	if not is_administrator():
+		raise frappe.PermissionError(_("Only the Administrator can manage the MCP Connector"))
 
 
 def _run(fn, *args):
@@ -65,7 +56,6 @@ def bootstrap():
 	_require_manager()
 	data = uc.GetBootstrap(FrappeSettingsRepository(), FrappeProfileRepository(), FrappeActionRepository()).execute()
 	data["endpoint"] = frappe.utils.get_url(ENDPOINT_PATH)
-	data["can_generate_keys"] = "System Manager" in frappe.get_roles()
 	data["dashboard"] = uc.GetDashboard(FrappeAuditQuery()).execute(24)
 	return data
 
@@ -205,17 +195,16 @@ def save_settings(settings):
 def logs(query=None):
 	_require_manager()
 	parsed = _run(parse_log_query, _payload(query) or {})
-	return uc.SearchLogs(FrappeAuditQuery()).execute(parsed, _is_system_manager())
+	return uc.SearchLogs(FrappeAuditQuery()).execute(parsed)
 
 
 @frappe.whitelist()
 def log_detail(name):
 	_require_manager()
-	return _run(uc.GetLog(FrappeAuditQuery()).execute, name, _is_system_manager())
+	return _run(uc.GetLog(FrappeAuditQuery()).execute, name)
 
 
 @frappe.whitelist(methods=["POST"])
 def generate_keys(user):
-	# Frappe itself only lets System Managers (re)generate API secrets.
-	_require_roles(("System Manager",))
+	_require_manager()
 	return _run(uc.GenerateKeys(FrappeDirectory()).execute, user)

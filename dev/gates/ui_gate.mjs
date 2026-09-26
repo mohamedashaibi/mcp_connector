@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { BASE_URL, up } from "../bench.mjs";
+import { BASE_URL, execute, up } from "../bench.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SHOTS = join(here, "..", "artifacts", "ui");
@@ -19,7 +19,7 @@ const check = (ok, message) => {
 await up();
 const browser = await chromium.launch();
 
-async function session({ theme = "Light", width = 1440 } = {}) {
+async function session({ theme = "Light", width = 1440, usr = "Administrator", pwd = "admin", console_page = true } = {}) {
 	const context = await browser.newContext({ viewport: { width, height: 1000 } });
 	const page = await context.newPage();
 	const errors = [];
@@ -27,13 +27,14 @@ async function session({ theme = "Light", width = 1440 } = {}) {
 	page.on("console", (m) => {
 		if (m.type() === "error" && !/favicon|Failed to load resource/.test(m.text())) errors.push(`console: ${m.text()}`);
 	});
-	const login = await page.request.post(`${BASE_URL}/api/method/login`, { form: { usr: "Administrator", pwd: "admin" } });
-	check(login.ok(), "login failed");
+	const login = await page.request.post(`${BASE_URL}/api/method/login`, { form: { usr, pwd } });
+	check(login.ok(), `login failed for ${usr}`);
 	await page.request.post(`${BASE_URL}/api/method/frappe.core.doctype.user.user.switch_theme`, { form: { theme } });
-	await page.goto(`${BASE_URL}/app/mcp-console`, { waitUntil: "networkidle" });
+	const start = console_page ? "/app/mcp-console" : "/app/home";
+	await page.goto(`${BASE_URL}${start}`, { waitUntil: "networkidle" });
 	await page.waitForTimeout(2000); // first desk boot clears its cache and reloads once
-	await page.goto(`${BASE_URL}/app/mcp-console`, { waitUntil: "networkidle" });
-	await page.locator(".mcpc-display").waitFor();
+	await page.goto(`${BASE_URL}${start}`, { waitUntil: "networkidle" });
+	if (console_page) await page.locator(".mcpc-display").waitFor();
 	return { context, page, errors };
 }
 
@@ -243,6 +244,39 @@ for (const [theme, width, label] of [["Dark", 1440, "dark-desktop"], ["Light", 1
 	}
 	check(errors.length === 0, `page errors (${label}): ${errors.join(" | ")}`);
 	await context.close();
+}
+
+// ---------------------------------------------------------------- only the Administrator sees the connector
+const sidebar_has_connector = async (page) => {
+	await page.goto(`${BASE_URL}/app/home`, { waitUntil: "networkidle" });
+	await page.locator(".desk-sidebar .sidebar-item-label").first().waitFor({ timeout: 15000 });
+	return (await page.locator(".desk-sidebar .sidebar-item-label", { hasText: /^MCP Connector$/ }).count()) > 0;
+};
+{
+	const admin = await session({ console_page: false });
+	check(await sidebar_has_connector(admin.page), "Administrator should see the MCP Connector sidebar item (positive control)");
+	await admin.context.close();
+
+	const creds = execute("mcp_connector.tests.e2e_setup.locked_out_user");
+	const other = await session({ usr: creds.user, pwd: creds.password, console_page: false });
+	check(!(await sidebar_has_connector(other.page)), "a System Manager must not see the MCP Connector sidebar item");
+	await shoot(other.page, "lockout-system-manager-home");
+	await other.page.goto(`${BASE_URL}/app/mcp-console`, { waitUntil: "networkidle" });
+	await other.page.waitForTimeout(1500);
+	check((await other.page.locator(".mcpc").count()) === 0, "a System Manager must not be able to open the MCP Console");
+	await shoot(other.page, "lockout-system-manager-console");
+	const csrf = await other.page.evaluate(() => frappe.csrf_token);
+	for (const [method, form] of [
+		["mcp_connector.api.console.bootstrap", {}],
+		["frappe.client.get_list", { doctype: "MCP Profile" }],
+		["frappe.client.get", { doctype: "MCP Settings", name: "MCP Settings" }],
+	]) {
+		const res = await other.page.request.post(`${BASE_URL}/api/method/${method}`, { headers: { "X-Frappe-CSRF-Token": csrf }, form });
+		const body = await res.json().catch(() => ({}));
+		const leaked = res.ok() && body.message && (!Array.isArray(body.message) || body.message.length);
+		check(!leaked, `${method} must not return MCP configuration to a System Manager (HTTP ${res.status()})`);
+	}
+	await other.context.close();
 }
 
 await browser.close();

@@ -242,7 +242,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 			} catch (e) {
 				set_html(
 					this.$main,
-					`<div class="mcpc-empty"><p>${esc(__("The MCP Console could not load. You need the System Manager or MCP Manager role."))}</p></div>`
+					`<div class="mcpc-empty"><p>${esc(__("The MCP Console could not load. Only the Administrator can manage the MCP Connector."))}</p></div>`
 				);
 				throw e;
 			}
@@ -2067,7 +2067,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				${r.result_summary ? `<h3 class="mcpc-h3">${esc(__("Result"))}</h3><p>${esc(r.result_summary)}</p>` : ""}
 				${r.error ? `<h3 class="mcpc-h3">${esc(__("Error"))}</h3><pre class="mcpc-pre mcpc-pre--bad">${esc(r.error)}</pre>` : ""}
 				${args ? `<h3 class="mcpc-h3">${esc(__("Arguments"))}</h3><pre class="mcpc-pre">${esc(args)}</pre>` : ""}
-				${r.details_hidden ? `<p class="mcpc-help">${esc(__("Arguments and error details are visible to System Managers only, as they can contain record values."))}</p>` : ""}`
+`
 			);
 			d.show();
 		}
@@ -2094,8 +2094,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 						<h2 class="mcpc-h3">${esc(__("Credentials"))}</h2>
 						<p class="mcpc-help">${esc(__("Use a dedicated integration user, so its roles — and therefore its profile — are exactly what the AI needs."))}</p>
 						<div class="mcpc-keyrow"><div class="mcpc-adder mcpc-adder--wide" data-adder="connect-user"></div>
-						${this.data.can_generate_keys ? `<button type="button" class="btn btn-default btn-sm" data-act="generate-keys" ${c.user ? "" : "disabled"}>${esc(__("Generate API key"))}</button>` : ""}</div>
-						${this.data.can_generate_keys ? "" : `<p class="mcpc-help">${esc(__("Only a System Manager can generate API keys. Ask one, or have the user generate keys from their User settings."))}</p>`}
+						<button type="button" class="btn btn-default btn-sm" data-act="generate-keys" ${c.user ? "" : "disabled"}>${esc(__("Generate API key"))}</button></div>
 						<div class="mcpc-connect-user" aria-live="polite"></div>
 						<div class="mcpc-keys"></div>
 					</li>

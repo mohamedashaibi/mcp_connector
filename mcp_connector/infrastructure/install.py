@@ -3,31 +3,26 @@ import frappe
 from mcp_connector.domain.catalog import BUILTIN_TOOLS
 from mcp_connector.infrastructure.policy_source import clear_cache
 
-MANAGER_ROLE = "MCP Manager"
-
-
-def before_install():
-	ensure_role()
+LEGACY_MANAGER_ROLE = "MCP Manager"
 
 
 def after_install():
-	ensure_role()
 	sync_standard_actions()
 	ensure_settings_defaults()
 
 
 def after_migrate():
-	ensure_role()
+	remove_legacy_manager_role()
 	sync_standard_actions()
 	ensure_settings_defaults()
 	clear_cache()
 
 
-def ensure_role():
-	if not frappe.db.exists("Role", MANAGER_ROLE):
-		frappe.get_doc(
-			{"doctype": "Role", "role_name": MANAGER_ROLE, "desk_access": 1, "description": "Manages MCP Connector access profiles"}
-		).insert(ignore_permissions=True)
+def remove_legacy_manager_role():
+	"""Earlier versions created an 'MCP Manager' role; management is now Administrator-only."""
+	if frappe.db.exists("Role", LEGACY_MANAGER_ROLE):
+		frappe.db.delete("Has Role", {"role": LEGACY_MANAGER_ROLE})
+		frappe.delete_doc("Role", LEGACY_MANAGER_ROLE, ignore_permissions=True, force=True)
 
 
 def sync_standard_actions():

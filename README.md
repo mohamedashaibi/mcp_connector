@@ -152,8 +152,10 @@ docker compose exec backend bench --site erp.example.com install-app mcp_connect
 
 ## 2. First-time setup
 
-Open **`/app/mcp-console`** (or the *MCP Connector* workspace) as a System Manager. Users with the
-new **MCP Manager** role can manage profiles too.
+Log in as **Administrator** and open **`/app/mcp-console`** (or the *MCP Connector* workspace).
+Only the Administrator can see the workspace, open the console, or read and change profiles,
+actions, settings and the audit log. Other users, System Managers included, don't even see the
+sidebar entry, and granting them role permissions on these DocTypes has no effect.
 
 1. **Create an integration user** (*User → New*, type *System User*) such as
    `ai-assistant@example.com`, and give it only the ERPNext roles the AI genuinely needs
@@ -177,8 +179,8 @@ new **MCP Manager** role can manage profiles too.
 
 *Console → Connect* generates the configuration for you. Manually:
 
-1. Generate API keys for the integration user (*Console → Connect → Generate API key*, or
-   *User → Settings → API Access → Generate Keys*). Keep the secret safe; it is shown once.
+1. Generate API keys for the integration user (*Console → Connect → Generate API key*). Keep the
+   secret safe; it is shown once.
 2. The endpoint is
 
    ```
@@ -337,8 +339,8 @@ inside your method — validate what it does. Generic CRUD and auth methods (`fr
   scope, leaves nothing behind — its queued webhooks, background jobs and realtime events are
   dropped too.
 - Every tool call is written to **MCP Audit Log** (who, what, target, result, duration, client IP),
-  with passwords, tokens and keys masked. Retention is configurable. Logged arguments can contain
-  record values, so only System Managers see them; MCP Managers see redacted entries.
+  with passwords, tokens and keys masked. Retention is configurable. Like all of the connector's
+  configuration, the audit log is visible to the Administrator only.
 - Report Builder reports can only be filtered on their own columns, so hidden fields cannot be
   probed through report filters.
 - Browser requests are accepted only from the site itself or origins you list in Settings.
