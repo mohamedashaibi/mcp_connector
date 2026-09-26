@@ -1,0 +1,211 @@
+{
+ "actions": [],
+ "creation": "2026-09-26 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "profile_name",
+  "enabled",
+  "column_break_header",
+  "description",
+  "assignment_section",
+  "roles",
+  "column_break_assignment",
+  "users",
+  "action_types_section",
+  "allow_read",
+  "allow_create",
+  "allow_update",
+  "column_break_types_1",
+  "allow_delete",
+  "allow_submit",
+  "allow_cancel",
+  "column_break_types_2",
+  "allow_report",
+  "allow_custom",
+  "actions_section",
+  "actions",
+  "doctypes_section",
+  "doctypes",
+  "reports_section",
+  "reports"
+ ],
+ "fields": [
+  {
+   "fieldname": "profile_name",
+   "fieldtype": "Data",
+   "label": "Profile Name",
+   "reqd": 1,
+   "unique": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "assignment_section",
+   "fieldtype": "Section Break",
+   "label": "Who Can Use It",
+   "description": "The profile applies to users holding any of these roles, and to the listed users."
+  },
+  {
+   "fieldname": "roles",
+   "fieldtype": "Table MultiSelect",
+   "label": "Roles",
+   "options": "MCP Profile Role"
+  },
+  {
+   "fieldname": "column_break_assignment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "users",
+   "fieldtype": "Table MultiSelect",
+   "label": "Users",
+   "options": "MCP Profile User"
+  },
+  {
+   "fieldname": "action_types_section",
+   "fieldtype": "Section Break",
+   "label": "Action Types",
+   "description": "Master switches. An action type that is off disables its actions and DocType operations in this profile."
+  },
+  {
+   "fieldname": "allow_read",
+   "fieldtype": "Check",
+   "label": "Read",
+   "default": "1"
+  },
+  {
+   "fieldname": "allow_create",
+   "fieldtype": "Check",
+   "label": "Create"
+  },
+  {
+   "fieldname": "allow_update",
+   "fieldtype": "Check",
+   "label": "Update"
+  },
+  {
+   "fieldname": "column_break_types_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "allow_delete",
+   "fieldtype": "Check",
+   "label": "Delete"
+  },
+  {
+   "fieldname": "allow_submit",
+   "fieldtype": "Check",
+   "label": "Submit"
+  },
+  {
+   "fieldname": "allow_cancel",
+   "fieldtype": "Check",
+   "label": "Cancel"
+  },
+  {
+   "fieldname": "column_break_types_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "allow_report",
+   "fieldtype": "Check",
+   "label": "Reports"
+  },
+  {
+   "fieldname": "allow_custom",
+   "fieldtype": "Check",
+   "label": "Custom Actions"
+  },
+  {
+   "fieldname": "actions_section",
+   "fieldtype": "Section Break",
+   "label": "Actions"
+  },
+  {
+   "fieldname": "actions",
+   "fieldtype": "Table MultiSelect",
+   "label": "Allowed Actions",
+   "options": "MCP Profile Action",
+   "description": "The MCP tools this profile exposes."
+  },
+  {
+   "fieldname": "doctypes_section",
+   "fieldtype": "Section Break",
+   "label": "DocTypes"
+  },
+  {
+   "fieldname": "doctypes",
+   "fieldtype": "Table",
+   "label": "DocTypes",
+   "options": "MCP Profile DocType"
+  },
+  {
+   "fieldname": "reports_section",
+   "fieldtype": "Section Break",
+   "label": "Reports"
+  },
+  {
+   "fieldname": "reports",
+   "fieldtype": "Table",
+   "label": "Reports",
+   "options": "MCP Profile Report"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-26 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MCP Connector",
+ "name": "MCP Profile",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "print": 0,
+   "email": 0,
+   "share": 0,
+   "export": 1,
+   "report": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "MCP Manager",
+   "read": 1,
+   "print": 0,
+   "email": 0,
+   "share": 0,
+   "export": 1,
+   "report": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "field:profile_name",
+ "naming_rule": "By fieldname",
+ "allow_rename": 1,
+ "track_changes": 1,
+ "title_field": "profile_name"
+}

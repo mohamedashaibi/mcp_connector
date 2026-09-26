@@ -1,0 +1,16 @@
+{
+  "name": "mcp-connector-dev",
+  "private": true,
+  "type": "module",
+  "description": "Verification tooling for the MCP Connector app (not shipped with the app)",
+  "scripts": {
+    "bench:up": "node bench.mjs up",
+    "bench:down": "node bench.mjs down",
+    "e2e": "node gates/mcp_e2e_gate.mjs",
+    "ui": "node gates/ui_gate.mjs"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "playwright": "^1.55.0"
+  }
+}

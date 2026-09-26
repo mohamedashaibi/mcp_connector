@@ -1,0 +1,39 @@
+# Disposable Frappe/ERPNext v14 bench for developing and verifying the app.
+#   node dev/bench.mjs up      -> start, create site mcp.localhost, install the app, serve on :8014
+#   node dev/bench.mjs down    -> stop and delete everything
+name: mcp-connector-v14
+
+services:
+  db:
+    image: mariadb:10.6
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+      - --skip-innodb-read-only-compressed
+    environment:
+      MYSQL_ROOT_PASSWORD: admin
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--password=admin"]
+      interval: 2s
+      retries: 60
+
+  redis:
+    image: redis:6.2-alpine
+
+  backend:
+    image: frappe/erpnext:v14.92.12
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ../..:/home/frappe/frappe-bench/apps/mcp_connector
+      - sites:/home/frappe/frappe-bench/sites
+    ports:
+      - "8014:8000"
+    command: ["sleep", "infinity"]
+
+volumes:
+  sites:

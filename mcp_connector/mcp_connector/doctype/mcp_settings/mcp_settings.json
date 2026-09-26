@@ -1,0 +1,173 @@
+{
+ "actions": [],
+ "creation": "2026-09-26 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "server_section",
+  "enabled",
+  "server_name",
+  "column_break_server",
+  "instructions",
+  "limits_section",
+  "default_page_size",
+  "max_page_size",
+  "column_break_limits",
+  "max_report_rows",
+  "rate_limit_per_minute",
+  "audit_section",
+  "audit_mode",
+  "log_arguments",
+  "column_break_audit",
+  "log_retention_days",
+  "security_section",
+  "allowed_origins"
+ ],
+ "fields": [
+  {
+   "fieldname": "server_section",
+   "fieldtype": "Section Break",
+   "label": "Server"
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enable MCP Server",
+   "default": "1",
+   "description": "Master switch. When off, every MCP request is refused."
+  },
+  {
+   "fieldname": "server_name",
+   "fieldtype": "Data",
+   "label": "Server Name",
+   "default": "ERPNext MCP",
+   "description": "Shown to AI clients when they connect."
+  },
+  {
+   "fieldname": "column_break_server",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "instructions",
+   "fieldtype": "Small Text",
+   "label": "Instructions for AI Clients",
+   "description": "Sent to the AI client on connect. Leave empty for the built-in guidance."
+  },
+  {
+   "fieldname": "limits_section",
+   "fieldtype": "Section Break",
+   "label": "Limits"
+  },
+  {
+   "fieldname": "default_page_size",
+   "fieldtype": "Int",
+   "label": "Default Page Size",
+   "default": "20",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "max_page_size",
+   "fieldtype": "Int",
+   "label": "Maximum Page Size",
+   "default": "100",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_limits",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "max_report_rows",
+   "fieldtype": "Int",
+   "label": "Maximum Report Rows",
+   "default": "200",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "rate_limit_per_minute",
+   "fieldtype": "Int",
+   "label": "Requests per Minute per User",
+   "default": "120",
+   "non_negative": 1,
+   "description": "0 disables rate limiting."
+  },
+  {
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Audit"
+  },
+  {
+   "fieldname": "audit_mode",
+   "fieldtype": "Select",
+   "label": "Audit Mode",
+   "options": "All Requests\nWrites and Failures\nDisabled",
+   "default": "All Requests"
+  },
+  {
+   "fieldname": "log_arguments",
+   "fieldtype": "Check",
+   "label": "Log Tool Arguments",
+   "default": "1",
+   "description": "Secrets such as passwords and tokens are always masked."
+  },
+  {
+   "fieldname": "column_break_audit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "log_retention_days",
+   "fieldtype": "Int",
+   "label": "Keep Logs for (Days)",
+   "default": "30",
+   "non_negative": 1,
+   "description": "0 keeps audit logs forever."
+  },
+  {
+   "fieldname": "security_section",
+   "fieldtype": "Section Break",
+   "label": "Security"
+  },
+  {
+   "fieldname": "allowed_origins",
+   "fieldtype": "Small Text",
+   "label": "Allowed Browser Origins",
+   "description": "One origin per line, e.g. http://localhost:6274 for MCP Inspector. Requests without an Origin header (CLI and desktop clients) and requests from this site are always accepted."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-26 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MCP Connector",
+ "name": "MCP Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "print": 0,
+   "email": 0,
+   "share": 0,
+   "report": 0,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "MCP Manager",
+   "read": 1,
+   "print": 0,
+   "email": 0,
+   "share": 0,
+   "report": 0,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "issingle": 1,
+ "track_changes": 1
+}

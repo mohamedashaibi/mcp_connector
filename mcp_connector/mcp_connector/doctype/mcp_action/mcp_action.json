@@ -1,0 +1,160 @@
+{
+ "actions": [],
+ "creation": "2026-09-26 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "tool_name",
+  "title",
+  "action_type",
+  "column_break_header",
+  "enabled",
+  "is_standard",
+  "description_section",
+  "description",
+  "implementation_section",
+  "method",
+  "input_schema",
+  "column_break_hints",
+  "read_only_hint",
+  "destructive_hint"
+ ],
+ "fields": [
+  {
+   "fieldname": "tool_name",
+   "fieldtype": "Data",
+   "label": "Tool Name",
+   "reqd": 1,
+   "unique": 1,
+   "bold": 1,
+   "description": "The name the AI calls, in snake_case (e.g. get_stock_balance)."
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "in_list_view": 1,
+   "read_only_depends_on": "eval:doc.is_standard"
+  },
+  {
+   "fieldname": "action_type",
+   "fieldtype": "Select",
+   "label": "Action Type",
+   "options": "Read\nCreate\nUpdate\nDelete\nSubmit\nCancel\nReport\nCustom",
+   "default": "Custom",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only_depends_on": "eval:doc.is_standard"
+  },
+  {
+   "fieldname": "column_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1",
+   "in_list_view": 1,
+   "description": "Disabled actions are hidden from every profile."
+  },
+  {
+   "fieldname": "is_standard",
+   "fieldtype": "Check",
+   "label": "Standard",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": "Description"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
+   "description": "What the AI is told this tool does. For standard actions, leave empty to use the built-in text."
+  },
+  {
+   "fieldname": "implementation_section",
+   "fieldtype": "Section Break",
+   "label": "Implementation",
+   "depends_on": "eval:!doc.is_standard"
+  },
+  {
+   "fieldname": "method",
+   "fieldtype": "Data",
+   "label": "Method",
+   "depends_on": "eval:!doc.is_standard",
+   "mandatory_depends_on": "eval:!doc.is_standard",
+   "description": "Dotted path of a whitelisted Python method, or the API method of an API Server Script."
+  },
+  {
+   "fieldname": "input_schema",
+   "fieldtype": "Code",
+   "label": "Input Schema",
+   "options": "JSON",
+   "depends_on": "eval:!doc.is_standard",
+   "description": "JSON Schema of the arguments, e.g. {\"type\": \"object\", \"properties\": {\"item_code\": {\"type\": \"string\"}}, \"required\": [\"item_code\"]}."
+  },
+  {
+   "fieldname": "column_break_hints",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "read_only_hint",
+   "fieldtype": "Check",
+   "label": "Read-only (no side effects)",
+   "depends_on": "eval:!doc.is_standard"
+  },
+  {
+   "fieldname": "destructive_hint",
+   "fieldtype": "Check",
+   "label": "Destructive",
+   "depends_on": "eval:!doc.is_standard"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-26 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MCP Connector",
+ "name": "MCP Action",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "print": 0,
+   "email": 0,
+   "share": 0,
+   "export": 1,
+   "report": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "MCP Manager",
+   "read": 1,
+   "print": 0,
+   "email": 0,
+   "share": 0,
+   "export": 1,
+   "report": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "field:tool_name",
+ "naming_rule": "By fieldname",
+ "track_changes": 1,
+ "title_field": "title",
+ "show_title_field_in_link": 0
+}
