@@ -50,9 +50,15 @@
 	outline-offset: 2px;
 }
 
-.mcpc button {
+/* :where() keeps this reset at zero specificity so component classes can set colour. */
+:where(.mcpc) button {
 	font: inherit;
 	color: inherit;
+}
+
+.mcpc button:focus:not(:focus-visible) {
+	outline: none;
+	box-shadow: none;
 }
 
 .mcpc-i {
@@ -808,6 +814,7 @@
 
 /* ---------------------------------------------------------------- tables */
 .mcpc-tablewrap {
+	position: relative; /* contains absolutely positioned .sr-only text inside the scroller */
 	overflow-x: auto;
 	-webkit-overflow-scrolling: touch;
 }
@@ -885,7 +892,7 @@
 }
 
 .mcpc-matrix__dt {
-	min-width: 190px;
+	min-width: 200px;
 	text-align: start;
 	font-weight: 400;
 	position: sticky;
@@ -918,6 +925,18 @@
 	text-align: center !important;
 }
 
+.mcpc-matrix thead .mcpc-matrix__op,
+.mcpc-matrix td.mcpc-cell {
+	padding-inline: 2px;
+}
+
+.mcpc-matrix__cfg {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 10px;
+}
+
 .mcpc-matrix__op.is-inactive .mcpc-colbtn {
 	opacity: 0.55;
 	text-decoration: line-through;
@@ -941,7 +960,7 @@
 
 .mcpc-cell {
 	text-align: center;
-	width: 72px;
+	width: 58px;
 }
 
 .mcpc-cell.is-na,
@@ -2209,6 +2228,146 @@
 	.mcpc-filters select {
 		width: 100%;
 		max-width: none;
+	}
+}
+
+/* ---------------------------------------------------------------- bulk add */
+.mcpc-toolbar__add {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 0 1 480px;
+}
+
+.mcpc-toolbar__add .mcpc-adder {
+	flex: 1 1 auto;
+	max-width: none;
+}
+
+.mcpc-toolbar__add .btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+}
+
+.mcpc-matrixbar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin: 0 0 12px;
+}
+
+.mcpc-matrixbar input {
+	max-width: 260px;
+}
+
+.mcpc-matrixbar__count {
+	margin: 0;
+}
+
+.mcpc-linkbtn--danger {
+	margin-inline-start: auto;
+	color: var(--c-bad-ink);
+}
+
+.mcpc-bulk__bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 16px;
+	margin-bottom: 14px;
+}
+
+.mcpc-bulk__bar input {
+	flex: 1 1 280px;
+	max-width: 420px;
+}
+
+.mcpc-bulk__count {
+	margin: 0;
+	font-weight: 600;
+	color: var(--c-ink-2);
+}
+
+.mcpc-bulk__grant {
+	margin-bottom: 12px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--c-line);
+}
+
+.mcpc-bulk__grant .mcpc-acts {
+	margin: 6px 0 8px;
+	padding-inline-start: 0;
+}
+
+.mcpc-bulk__list {
+	max-height: 56vh;
+	overflow-y: auto;
+	padding: 2px 2px 8px;
+}
+
+.mcpc-bgroup + .mcpc-bgroup {
+	margin-top: 18px;
+}
+
+.mcpc-bgroup__head {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 0;
+	background: var(--modal-bg, var(--c-surface));
+}
+
+.mcpc-bgroup__name {
+	font-size: 13px;
+	font-weight: 700;
+}
+
+.mcpc-bgroup__count {
+	font-family: var(--f-mono);
+	font-size: 11.5px;
+	color: var(--c-muted);
+}
+
+.mcpc-bgrid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+	gap: 6px;
+}
+
+.mcpc-bitem {
+	grid-template-columns: 16px minmax(0, 1fr);
+	align-items: center;
+}
+
+.mcpc-bitem .mcpc-field__label {
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.mcpc-bitem__badges {
+	grid-column: 2;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.mcpc-bitem__badges:empty {
+	display: none;
+}
+
+@media (max-width: 767px) {
+	.mcpc-toolbar__add {
+		flex-wrap: wrap;
+		flex-basis: 100%;
+	}
+
+	.mcpc-bgrid {
+		grid-template-columns: minmax(0, 1fr);
 	}
 }
 

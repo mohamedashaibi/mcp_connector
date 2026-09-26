@@ -129,6 +129,19 @@ async function shoot(page, name) {
 	await scope.locator(".btn-modal-primary").click();
 	await page.waitForTimeout(400);
 	check((await page.locator('[data-act="edit-scope"][data-row="0"]').innerText()).includes("1 condition"), "scope button does not show the condition");
+
+	// Bulk add: every DocType of one module at once, granting Read + Create.
+	await page.locator('[data-act="bulk-doctypes"]').click();
+	const bulk = page.locator(".modal:visible");
+	await bulk.locator('[data-k="search"]').fill("MCP Test");
+	await bulk.locator('[data-k="group"][data-group="MCP Connector"]').waitFor();
+	await bulk.locator('[data-k="group"][data-group="MCP Connector"]').click();
+	await bulk.locator('[data-k="op"][data-op="Create"]').click();
+	check((await bulk.locator(".btn-modal-primary").innerText()).includes("2"), "bulk picker footer should count 2 selected DocTypes");
+	await shoot(page, "light-desktop-dialog-bulk");
+	await bulk.locator(".btn-modal-primary").click();
+	await page.waitForTimeout(500);
+	check((await page.locator(".mcpc-matrix tbody tr").count()) === 3, "bulk add should leave 3 DocType rows");
 	await shoot(page, "light-desktop-profile-doctypes");
 
 	// Reports: one report with a fixed filter.
@@ -137,6 +150,14 @@ async function shoot(page, name) {
 	await page.locator('[data-act="add-fixed"][data-row="0"]').click();
 	await page.locator('[data-bind="profile.fixed.0.0:key"]').fill("doctype");
 	await page.locator('[data-bind="profile.fixed.0.0:value"]').fill("ToDo");
+	await page.locator('[data-act="bulk-reports"]').click();
+	const bulkReports = page.locator(".modal:visible");
+	await bulkReports.locator('[data-k="search"]').fill("Document Share");
+	await bulkReports.locator('[data-k="item"][data-name="Document Share Report"]').waitFor();
+	await bulkReports.locator('[data-k="item"][data-name="Document Share Report"]').click();
+	await bulkReports.locator(".btn-modal-primary").click();
+	await page.waitForTimeout(500);
+	check((await page.locator(".mcpc-report").count()) === 2, "bulk report add should leave 2 report rows");
 	await shoot(page, "light-desktop-profile-reports");
 
 	// Save with the keyboard shortcut.
@@ -155,6 +176,11 @@ async function shoot(page, name) {
 	check(todo && todo.field_mode === "Exclude Listed Fields" && todo.field_list.join() === "assigned_by", "ToDo field rule not stored");
 	check(todo && JSON.stringify(todo.scope) === JSON.stringify([["status", "!=", "Cancelled"]]), `ToDo scope not stored: ${todo && JSON.stringify(todo.scope)}`);
 	check(todo && todo.notes === "Open work only", "ToDo notes not stored");
+	for (const dt of ["MCP Test Order", "MCP Test Request"]) {
+		const row = saved && saved.doctypes.find((d) => d.doctype === dt);
+		check(row && row.operations.join() === "Read,Create", `bulk-added ${dt} should grant Read,Create, got ${row && row.operations}`);
+	}
+	check(saved && saved.reports.some((r) => r.report === "Document Share Report"), "bulk-added report not stored");
 	const rep = saved && saved.reports.find((r) => r.report === "Permitted Documents For User");
 	check(rep && rep.fixed_filters && rep.fixed_filters.doctype === "ToDo", "report fixed filter not stored");
 
@@ -194,17 +220,26 @@ async function shoot(page, name) {
 }
 
 // ---------------------------------------------------------------- dark + narrow renders
-for (const [theme, width, label] of [["Dark", 1440, "dark-desktop"], ["Light", 390, "light-narrow"], ["Dark", 390, "dark-narrow"]]) {
+for (const [theme, width, label] of [["Dark", 1440, "dark-desktop"], ["Light", 1024, "light-tablet"], ["Light", 390, "light-narrow"], ["Dark", 390, "dark-narrow"]]) {
 	const { context, page, errors } = await session({ theme, width });
 	for (const section of ["overview", "profiles", "actions", "activity", "connect", "settings"]) {
 		await page.goto(`${BASE_URL}/app/mcp-console/${section}`, { waitUntil: "networkidle" });
 		await page.waitForTimeout(700);
 		check((await page.locator(".mcpc-main").innerText()).length > 50, `${label} ${section} rendered empty`);
-		if (width < 500) {
+		{
 			const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 			check(overflow <= 1, `${label} ${section} scrolls horizontally by ${overflow}px`);
 		}
 		await shoot(page, `${label}-${section}`);
+	}
+	await page.goto(`${BASE_URL}/app/mcp-console/profiles/E2E%20Sales`, { waitUntil: "networkidle" });
+	const tab = page.locator('[data-act="editor-tab"][data-tab="doctypes"]');
+	if (await tab.count()) {
+		await tab.click();
+		await page.waitForTimeout(500);
+		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+		check(overflow <= 1, `${label} DocTypes matrix widens the page by ${overflow}px`);
+		await shoot(page, `${label}-profile-doctypes`);
 	}
 	check(errors.length === 0, `page errors (${label}): ${errors.join(" | ")}`);
 	await context.close();

@@ -15,6 +15,7 @@ from mcp_connector.domain.errors import InvalidArguments, NotFound
 from mcp_connector.infrastructure.console_repos import (
 	FrappeActionRepository,
 	FrappeAuditQuery,
+	FrappeCatalogRepository,
 	FrappeDirectory,
 	FrappeProfileRepository,
 	FrappeSettingsRepository,
@@ -153,6 +154,19 @@ def describe_report(report):
 	if info is None:
 		frappe.throw(_("Report {0} does not exist").format(report), frappe.DoesNotExistError)
 	return {"report": info.name, "report_type": info.report_type, "ref_doctype": info.ref_doctype, "filters": info.filters}
+
+
+@frappe.whitelist()
+def doctype_catalog():
+	"""All DocTypes that may be granted, for the bulk picker."""
+	_require_manager()
+	return uc.ListDoctypeCatalog(FrappeCatalogRepository()).execute()
+
+
+@frappe.whitelist()
+def report_catalog():
+	_require_manager()
+	return uc.ListReportCatalog(FrappeCatalogRepository()).execute()
 
 
 @frappe.whitelist()

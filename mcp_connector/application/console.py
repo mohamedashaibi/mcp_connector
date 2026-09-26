@@ -73,6 +73,37 @@ class Directory(Protocol):
 	def generate_keys(self, user: str) -> dict: ...
 
 
+class CatalogRepository(Protocol):
+	def doctypes(self) -> list: ...  # [{name, module, issingle, is_submittable, custom}]
+
+	def reports(self) -> list: ...  # [{name, module, report_type, ref_doctype}]
+
+
+# -- catalogs for the bulk pickers ------------------------------------------------
+
+
+class ListDoctypeCatalog:
+	"""Every DocType a profile could grant, grouped-ready, with its MCP restrictions."""
+
+	def __init__(self, catalog: CatalogRepository):
+		self.catalog = catalog
+
+	def execute(self) -> list:
+		return [
+			{**row, "writable": is_writable(row["name"])}
+			for row in self.catalog.doctypes()
+			if is_exposable(row["name"])
+		]
+
+
+class ListReportCatalog:
+	def __init__(self, catalog: CatalogRepository):
+		self.catalog = catalog
+
+	def execute(self) -> list:
+		return list(self.catalog.reports())
+
+
 # -- dashboard ------------------------------------------------------------------
 
 

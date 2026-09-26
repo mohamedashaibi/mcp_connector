@@ -35,6 +35,21 @@ class TestInstallation(McpTestCase):
 		doc.reload()
 		self.assertEqual((doc.enabled, doc.description, doc.title), (0, "Custom wording", "Count documents"))
 
+	def test_audit_retention_purges_only_old_entries(self):
+		from frappe.utils import add_days, now_datetime
+
+		from mcp_connector.domain.audit import AuditEntry
+		from mcp_connector.infrastructure.audit import FrappeAuditSink
+		from mcp_connector.mcp_connector.doctype.mcp_audit_log.mcp_audit_log import MCPAuditLog
+
+		FrappeAuditSink().record(AuditEntry(user="Administrator", rpc_method="tools/call", status="Success", tool="old_entry"))
+		FrappeAuditSink().record(AuditEntry(user="Administrator", rpc_method="tools/call", status="Success", tool="new_entry"))
+		old = frappe.get_all("MCP Audit Log", filters={"tool": "old_entry"}, pluck="name")[0]
+		frappe.db.set_value("MCP Audit Log", old, "creation", add_days(now_datetime(), -40), update_modified=False)
+		MCPAuditLog.clear_old_logs(30)
+		self.assertFalse(frappe.db.exists("MCP Audit Log", old))
+		self.assertTrue(frappe.db.exists("MCP Audit Log", {"tool": "new_entry"}))
+
 	def test_policy_cache_refreshes_after_profile_save(self):
 		load_profiles()
 		self.make_profile("Cache Probe", users=["Administrator"])

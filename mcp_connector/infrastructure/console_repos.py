@@ -368,6 +368,40 @@ class FrappeAuditQuery:
 		return data
 
 
+class FrappeCatalogRepository:
+	def doctypes(self) -> list:
+		rows = frappe.get_all(
+			"DocType",
+			filters={"istable": 0, "is_virtual": 0},
+			fields=["name", "module", "issingle", "is_submittable", "custom"],
+			order_by="module asc, name asc",
+			limit_page_length=0,
+		)
+		return [
+			{
+				"name": r.name,
+				"module": r.module or "",
+				"issingle": bool(r.issingle),
+				"is_submittable": bool(r.is_submittable),
+				"custom": bool(r.custom),
+			}
+			for r in rows
+		]
+
+	def reports(self) -> list:
+		rows = frappe.get_all(
+			"Report",
+			filters={"disabled": 0},
+			fields=["name", "module", "report_type", "ref_doctype"],
+			order_by="module asc, name asc",
+			limit_page_length=0,
+		)
+		return [
+			{"name": r.name, "module": r.module or "", "report_type": r.report_type, "ref_doctype": r.ref_doctype or ""}
+			for r in rows
+		]
+
+
 class FrappeDirectory:
 	def exists(self, user: str) -> bool:
 		return bool(frappe.db.exists("User", user))

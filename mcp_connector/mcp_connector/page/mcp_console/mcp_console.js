@@ -158,6 +158,12 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				this.handle(el.dataset.act, el, e);
 			});
 			this.root.addEventListener("input", (e) => {
+				if (e.target.dataset && e.target.dataset.role === "matrix-filter") {
+					this.editor.matrix_filter = e.target.value;
+					const term = e.target.value.trim().toLowerCase();
+					this.$main.querySelectorAll(".mcpc-matrix tbody tr[data-dt]").forEach((tr) => (tr.hidden = !!term && !tr.dataset.dt.includes(term)));
+					return;
+				}
 				const el = e.target.closest("[data-bind]");
 				if (el && this.root.contains(el)) this.bind_input(el);
 			});
@@ -173,16 +179,25 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 					if (again) again.focus();
 					e.preventDefault();
 				}
-				if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-					if (this.section === "profiles" && this.editor && (this.is_dirty() || !this.editor.profile.name)) {
-						e.preventDefault();
-						this.save_profile();
-					} else if (this.section === "settings" && this.settings_dirty()) {
-						e.preventDefault();
-						this.save_settings();
-					}
-				}
 			});
+			// Ctrl/Cmd+S saves wherever focus is. Capture phase on document, and the event is
+			// stopped, so Frappe's global "primary action" shortcut cannot also fire (it would
+			// click the save button of whatever form was opened last).
+			document.addEventListener(
+				"keydown",
+				(e) => {
+					if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "s") return;
+					if (frappe.get_route()[0] !== "mcp-console" || (window.cur_dialog && window.cur_dialog.display)) return;
+					let save = null;
+					if (this.section === "profiles" && this.editor && (this.is_dirty() || !this.editor.profile.name)) save = () => this.save_profile();
+					else if (this.section === "settings" && this.settings_dirty()) save = () => this.save_settings();
+					if (!save) return;
+					e.preventDefault();
+					e.stopPropagation();
+					save();
+				},
+				true
+			);
 		}
 
 		// -- routing -------------------------------------------------------------
@@ -286,6 +301,12 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				"toggle-op": () => this.toggle_op(row(), el.dataset.op),
 				"toggle-column": () => this.toggle_column(el.dataset.op),
 				"remove-doctype": () => this.edit((p) => p.doctypes.splice(row(), 1), "doctypes"),
+				"bulk-doctypes": () => this.bulk_add_doctypes(),
+				"bulk-reports": () => this.bulk_add_reports(),
+				"clear-doctypes": () =>
+					frappe.confirm(__("Remove all {0} DocTypes from this profile?", [this.editor.profile.doctypes.length]), () =>
+						this.edit((p) => (p.doctypes = []), "doctypes")
+					),
 				"edit-fields": () => this.fields_dialog(row()),
 				"edit-scope": () => this.scope_dialog(row()),
 				"remove-report": () => this.edit((p) => p.reports.splice(row(), 1), "reports"),
@@ -987,8 +1008,24 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				$body,
 				`<div class="mcpc-toolbar">
 					<p class="mcpc-help">${esc(__("Grant operations per DocType. ERPNext role and user permissions still apply on top of these rules."))}</p>
-					<div class="mcpc-adder mcpc-adder--wide" data-adder="doctype"></div>
+					<div class="mcpc-toolbar__add">
+						<div class="mcpc-adder mcpc-adder--wide" data-adder="doctype"></div>
+						<button type="button" class="btn btn-default btn-sm" data-act="bulk-doctypes">${icon("plus", 14)}<span>${esc(__("Add several"))}</span></button>
+					</div>
 				</div>
+				${
+					p.doctypes.length > 1
+						? `<div class="mcpc-matrixbar">
+					${
+						p.doctypes.length > 6
+							? `<input type="search" class="form-control" data-role="matrix-filter" value="${esc(this.editor.matrix_filter || "")}" placeholder="${esc(__("Filter DocTypes"))}" aria-label="${esc(__("Filter DocTypes"))}">`
+							: ""
+					}
+					<span class="mcpc-help mcpc-matrixbar__count">${esc(plural(p.doctypes.length, __("DocType"), __("DocTypes")))}</span>
+					<button type="button" class="mcpc-linkbtn mcpc-linkbtn--danger" data-act="clear-doctypes">${esc(__("Remove all"))}</button>
+				</div>`
+						: ""
+				}
 				${
 					p.doctypes.length
 						? `<div class="mcpc-tablewrap"><table class="mcpc-matrix">
@@ -999,8 +1036,6 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 							(op) => `<th scope="col" class="mcpc-matrix__op ${p.action_types.includes(op) ? "" : "is-inactive"}">
 								<button type="button" class="mcpc-colbtn" data-act="toggle-column" data-op="${op}" title="${esc(__("Toggle {0} for every DocType", [__(op)]))}">${esc(__(op))}</button></th>`
 						).join("")}
-						<th scope="col">${esc(__("Fields"))}</th>
-						<th scope="col">${esc(__("Scope & notes"))}</th>
 						<th scope="col"><span class="sr-only">${esc(__("Remove"))}</span></th>
 					</tr></thead>
 					<tbody>
@@ -1014,14 +1049,17 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 									meta.writable === false ? `<span class="mcpc-pill mcpc-pill--warn">${esc(__("read-only"))}</span>` : "",
 								].join("");
 								const n = scope_count(d);
-								return `<tr>
+								const term = (this.editor.matrix_filter || "").trim().toLowerCase();
+								return `<tr data-dt="${esc(d.doctype.toLowerCase())}" ${term && !d.doctype.toLowerCase().includes(term) ? "hidden" : ""}>
 									<th scope="row" class="mcpc-matrix__dt"><span class="mcpc-matrix__name">${esc(d.doctype)}</span>
-										<span class="mcpc-matrix__meta">${esc(meta.module || "")} ${badges}</span></th>
+										<span class="mcpc-matrix__meta">${esc(meta.module || "")} ${badges}</span>
+										<span class="mcpc-matrix__cfg">
+											<button type="button" class="mcpc-cellbtn ${d.field_mode === "All Fields" ? "" : "is-set"}" data-act="edit-fields" data-row="${i}" aria-label="${esc(__("Fields of {0}: {1}", [d.doctype, field_label(d)]))}">${esc(field_label(d))}</button>
+											<button type="button" class="mcpc-cellbtn ${n || d.notes ? "is-set" : ""}" data-act="edit-scope" data-row="${i}" aria-label="${esc(__("Scope and notes of {0}", [d.doctype]))}" ${meta.issingle ? "disabled" : ""}>${esc(
+												n ? plural(n, __("condition"), __("conditions")) : __("All records")
+											)}${d.notes ? ` · ${esc(__("notes"))}` : ""}</button>
+										</span></th>
 									${OPS.map((op) => cell(d, i, op)).join("")}
-									<td><button type="button" class="mcpc-cellbtn ${d.field_mode === "All Fields" ? "" : "is-set"}" data-act="edit-fields" data-row="${i}" aria-label="${esc(__("Fields of {0}: {1}", [d.doctype, field_label(d)]))}">${esc(field_label(d))}</button></td>
-									<td><button type="button" class="mcpc-cellbtn ${n || d.notes ? "is-set" : ""}" data-act="edit-scope" data-row="${i}" ${meta.issingle ? "disabled" : ""}>${esc(
-										n ? plural(n, __("condition"), __("conditions")) : __("All records")
-									)}${d.notes ? ` · ${esc(__("notes"))}` : ""}</button></td>
 									<td><button type="button" class="mcpc-iconbtn" data-act="remove-doctype" data-row="${i}" aria-label="${esc(__("Remove {0}", [d.doctype]))}">${icon("x", 14)}</button></td>
 								</tr>`;
 							})
@@ -1045,6 +1083,200 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				},
 				{ get_query: () => ({ filters: [["DocType", "istable", "=", 0], ["DocType", "name", "not in", this.data.protected.never]] }) }
 			);
+		}
+
+		async catalog(kind) {
+			this.catalogs = this.catalogs || {};
+			if (!this.catalogs[kind]) this.catalogs[kind] = await this.call(kind === "doctypes" ? "doctype_catalog" : "report_catalog", {}, true);
+			return this.catalogs[kind];
+		}
+
+		// A searchable, module-grouped multi-select. items: [{name, module, ...}]
+		bulk_picker({ title, noun, items, taken, badges, grant, on_apply }) {
+			const state = { term: "", selected: new Set(), ops: new Set(["Read"]) };
+			const d = new frappe.ui.Dialog({
+				title: esc(title),
+				size: "extra-large",
+				fields: [{ fieldtype: "HTML", fieldname: "body" }],
+				primary_action_label: __("Add"),
+				primary_action: () => {
+					if (!state.selected.size) return frappe.msgprint(__("Tick at least one {0}.", [esc(noun[0])]));
+					if (grant && !state.ops.size) return frappe.msgprint(__("Choose at least one operation to grant."));
+					on_apply([...state.selected], state);
+					d.hide();
+				},
+			});
+			const $body = d.fields_dict.body.$wrapper.get(0);
+			$body.classList.add("mcpc", "mcpc-dialog", "mcpc-bulk");
+			const visible = () => {
+				const term = state.term.trim().toLowerCase();
+				return items.filter((it) => !term || it.name.toLowerCase().includes(term) || (it.module || "").toLowerCase().includes(term));
+			};
+			const groups = () => {
+				const map = new Map();
+				visible().forEach((it) => {
+					const key = it.module || __("Other");
+					if (!map.has(key)) map.set(key, []);
+					map.get(key).push(it);
+				});
+				return map;
+			};
+			const update_footer = () => {
+				const n = state.selected.size;
+				d.get_primary_btn().text(n ? __("Add {0}", [plural(n, noun[0], noun[1])]) : __("Add"));
+				const $count = $body.querySelector(".mcpc-bulk__count");
+				if ($count) $count.textContent = __("{0} selected", [n]);
+			};
+			const list_html = () => {
+				const g = groups();
+				if (!g.size) return `<p class="mcpc-muted mcpc-pad">${esc(__("Nothing matches “{0}”.", [state.term]))}</p>`;
+				return [...g.entries()]
+					.map(([module, rows]) => {
+						const free = rows.filter((r) => !taken.has(r.name));
+						const all_on = free.length && free.every((r) => state.selected.has(r.name));
+						return `<section class="mcpc-bgroup">
+							<header class="mcpc-bgroup__head">
+								<span class="mcpc-bgroup__name">${esc(module)}</span>
+								<span class="mcpc-bgroup__count">${rows.length}</span>
+								${free.length ? `<button type="button" class="mcpc-linkbtn" data-k="group" data-group="${esc(module)}">${esc(all_on ? __("Clear") : __("Select all {0}", [free.length]))}</button>` : ""}
+							</header>
+							<div class="mcpc-bgrid">${rows
+								.map((r) => {
+									const is_taken = taken.has(r.name);
+									const on = is_taken || state.selected.has(r.name);
+									return `<button type="button" role="checkbox" aria-checked="${on}" class="mcpc-field mcpc-bitem" data-k="item" data-name="${esc(r.name)}" ${is_taken ? "disabled" : ""}>
+										<span class="mcpc-act__box" aria-hidden="true">${on ? icon("check", 12) : ""}</span>
+										<span class="mcpc-field__label">${esc(r.name)}</span>
+										<span class="mcpc-bitem__badges">${is_taken ? `<span class="mcpc-pill mcpc-pill--muted">${esc(__("added"))}</span>` : badges(r)}</span>
+									</button>`;
+								})
+								.join("")}</div>
+						</section>`;
+					})
+					.join("");
+			};
+			const render_list = () => {
+				set_html($body.querySelector(".mcpc-bulk__list"), list_html());
+				update_footer();
+			};
+			set_html(
+				$body,
+				`<div class="mcpc-bulk__bar">
+					<input type="search" class="form-control" data-k="search" placeholder="${esc(__("Search by name or module"))}" aria-label="${esc(__("Search"))}">
+					<span class="mcpc-help mcpc-bulk__count"></span>
+					<button type="button" class="mcpc-linkbtn" data-k="shown">${esc(__("Select everything shown"))}</button>
+					<button type="button" class="mcpc-linkbtn" data-k="none">${esc(__("Clear selection"))}</button>
+				</div>
+				${
+					grant
+						? `<div class="mcpc-bulk__grant"><span class="mcpc-label">${esc(__("Grant to everything added"))}</span>
+					<div class="mcpc-acts">${OPS.map(
+						(op) =>
+							`<button type="button" class="mcpc-act" aria-pressed="${state.ops.has(op)}" data-k="op" data-op="${op}"><span class="mcpc-act__box" aria-hidden="true">${
+								state.ops.has(op) ? icon("check", 12) : ""
+							}</span>${esc(__(op))}</button>`
+					).join("")}</div>
+					<p class="mcpc-help">${esc(
+						__("Submit and Cancel are applied only to submittable DocTypes, and write operations are skipped where a DocType is read-only over MCP. You can fine-tune each row afterwards.")
+					)}</p></div>`
+						: ""
+				}
+				<div class="mcpc-bulk__list" role="group" aria-label="${esc(title)}"></div>`
+			);
+			let timer = null;
+			$body.addEventListener("input", (e) => {
+				if (e.target.dataset.k !== "search") return;
+				state.term = e.target.value;
+				clearTimeout(timer);
+				timer = setTimeout(render_list, 120);
+			});
+			$body.addEventListener("click", (e) => {
+				const el = e.target.closest("[data-k]");
+				if (!el || el.disabled) return;
+				const k = el.dataset.k;
+				if (k === "item") {
+					const name = el.dataset.name;
+					state.selected.has(name) ? state.selected.delete(name) : state.selected.add(name);
+				} else if (k === "group") {
+					const rows = (groups().get(el.dataset.group) || []).filter((r) => !taken.has(r.name));
+					const all_on = rows.every((r) => state.selected.has(r.name));
+					rows.forEach((r) => (all_on ? state.selected.delete(r.name) : state.selected.add(r.name)));
+				} else if (k === "shown") visible().forEach((r) => taken.has(r.name) || state.selected.add(r.name));
+				else if (k === "none") state.selected.clear();
+				else if (k === "op") {
+					const op = el.dataset.op;
+					state.ops.has(op) ? state.ops.delete(op) : state.ops.add(op);
+					el.setAttribute("aria-pressed", String(state.ops.has(op)));
+					set_html(el.querySelector(".mcpc-act__box"), state.ops.has(op) ? icon("check", 12) : "");
+					return;
+				} else return;
+				render_list();
+			});
+			render_list();
+			d.show();
+			setTimeout(() => $body.querySelector('[data-k="search"]').focus(), 200);
+		}
+
+		async bulk_add_doctypes() {
+			const items = await this.catalog("doctypes");
+			const by_name = new Map(items.map((it) => [it.name, it]));
+			this.bulk_picker({
+				title: __("Add DocTypes"),
+				noun: [__("DocType"), __("DocTypes")],
+				items,
+				taken: new Set(this.editor.profile.doctypes.map((d) => d.doctype)),
+				grant: true,
+				badges: (r) =>
+					[
+						r.is_submittable ? `<span class="mcpc-pill mcpc-pill--muted">${esc(__("submittable"))}</span>` : "",
+						r.issingle ? `<span class="mcpc-pill mcpc-pill--muted">${esc(__("single"))}</span>` : "",
+						r.writable ? "" : `<span class="mcpc-pill mcpc-pill--warn">${esc(__("read-only"))}</span>`,
+						r.custom ? `<span class="mcpc-pill mcpc-pill--info">${esc(__("custom"))}</span>` : "",
+					].join(""),
+				on_apply: (names, state) => {
+					this.edit((p) => {
+						for (const name of names) {
+							const it = by_name.get(name);
+							let ops = OPS.filter(
+								(op) => state.ops.has(op) && (!["Submit", "Cancel"].includes(op) || it.is_submittable) && (op === "Read" || it.writable)
+							);
+							if (!ops.length) ops = ["Read"];
+							p.doctypes.push({
+								doctype: name,
+								operations: ops,
+								field_mode: "All Fields",
+								field_list: [],
+								scope: null,
+								notes: "",
+								meta: { exists: true, module: it.module, is_submittable: it.is_submittable, issingle: it.issingle, istable: false, exposable: true, writable: it.writable },
+							});
+						}
+					}, "doctypes");
+					frappe.show_alert({ message: __("Added {0}", [esc(plural(names.length, __("DocType"), __("DocTypes")))]), indicator: "green" }, 3);
+				},
+			});
+		}
+
+		async bulk_add_reports() {
+			const items = await this.catalog("reports");
+			const by_name = new Map(items.map((it) => [it.name, it]));
+			this.bulk_picker({
+				title: __("Add reports"),
+				noun: [__("report"), __("reports")],
+				items,
+				taken: new Set(this.editor.profile.reports.map((r) => r.report)),
+				grant: false,
+				badges: (r) => `<span class="mcpc-pill mcpc-pill--muted">${esc(r.report_type)}</span>`,
+				on_apply: (names) => {
+					this.edit((p) => {
+						for (const name of names) {
+							const it = by_name.get(name);
+							p.reports.push({ report: name, fixed_filters: null, fixed_rows: [], notes: "", meta: { exists: true, report_type: it.report_type, ref_doctype: it.ref_doctype } });
+						}
+					}, "reports");
+					frappe.show_alert({ message: __("Added {0}", [esc(plural(names.length, __("report"), __("reports")))]), indicator: "green" }, 3);
+				},
+			});
 		}
 
 		toggle_op(i, op) {
@@ -1268,7 +1500,10 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				$body,
 				`<div class="mcpc-toolbar">
 					<p class="mcpc-help">${esc(__("Reports the AI may run. Fixed filters are forced on every run, whatever the AI asks for — use them to pin a company or cost center."))}</p>
-					<div class="mcpc-adder mcpc-adder--wide" data-adder="report"></div>
+					<div class="mcpc-toolbar__add">
+						<div class="mcpc-adder mcpc-adder--wide" data-adder="report"></div>
+						<button type="button" class="btn btn-default btn-sm" data-act="bulk-reports">${icon("plus", 14)}<span>${esc(__("Add several"))}</span></button>
+					</div>
 				</div>
 				${
 					p.reports.length

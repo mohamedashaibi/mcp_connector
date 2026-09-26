@@ -60,9 +60,25 @@ class TestConsoleApi(McpTestCase):
 		data.update(overrides)
 		return data
 
+	def test_bulk_picker_catalogs(self):
+		doctypes = {d["name"]: d for d in console.doctype_catalog()}
+		self.assertIn(F.ORDER, doctypes)
+		self.assertTrue(doctypes[F.ORDER]["is_submittable"] and doctypes[F.ORDER]["writable"])
+		self.assertEqual(doctypes[F.ORDER]["module"], "MCP Connector")
+		self.assertFalse(doctypes["User"]["writable"])
+		for hidden in ("MCP Profile", "MCP Audit Log", "System Console", F.ORDER_ITEM):
+			self.assertNotIn(hidden, doctypes)
+		reports = {r["name"]: r for r in console.report_catalog()}
+		self.assertEqual(reports[F.REPORT]["report_type"], "Query Report")
+
 	def test_endpoints_require_manager_role(self):
 		frappe.set_user(F.SALES_USER)
-		for call in (console.bootstrap, lambda: console.get_profile("Console Sales"), lambda: console.inspect_user(F.SALES_USER)):
+		for call in (
+			console.bootstrap,
+			console.doctype_catalog,
+			lambda: console.get_profile("Console Sales"),
+			lambda: console.inspect_user(F.SALES_USER),
+		):
 			with self.assertRaises(frappe.PermissionError):
 				call()
 

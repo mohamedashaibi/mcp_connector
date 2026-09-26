@@ -1,5 +1,6 @@
 import unittest
 
+from mcp_connector.application.console import ListDoctypeCatalog, ListReportCatalog
 from mcp_connector.application.console_dto import parse_action, parse_log_query, parse_profile, parse_settings
 from mcp_connector.domain.errors import InvalidArguments
 
@@ -74,6 +75,28 @@ class TestConsolePayloads(unittest.TestCase):
 		self.assertEqual(parse_log_query(None).limit, 50)
 		with self.assertRaises(InvalidArguments):
 			parse_log_query({"limit": 10_000})
+
+
+class FakeCatalog:
+	def doctypes(self):
+		return [
+			{"name": n, "module": m, "issingle": False, "is_submittable": False, "custom": False}
+			for n, m in (("Customer", "Selling"), ("User", "Core"), ("MCP Profile", "MCP Connector"), ("System Console", "Desk"))
+		]
+
+	def reports(self):
+		return [{"name": "General Ledger", "module": "Accounts", "report_type": "Script Report", "ref_doctype": "GL Entry"}]
+
+
+class TestCatalogs(unittest.TestCase):
+	def test_doctype_catalog_hides_protected_and_flags_read_only(self):
+		rows = {r["name"]: r for r in ListDoctypeCatalog(FakeCatalog()).execute()}
+		self.assertEqual(set(rows), {"Customer", "User"})
+		self.assertTrue(rows["Customer"]["writable"])
+		self.assertFalse(rows["User"]["writable"])
+
+	def test_report_catalog(self):
+		self.assertEqual([r["name"] for r in ListReportCatalog(FakeCatalog()).execute()], ["General Ledger"])
 
 
 if __name__ == "__main__":
