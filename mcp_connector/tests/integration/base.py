@@ -5,10 +5,16 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from mcp_connector.api.mcp import build_handler, build_session
-from mcp_connector.domain.action_types import ACTION_TYPE_FIELD, OPERATION_FIELD
+from mcp_connector.domain.action_types import ACTION_TYPE_FIELD, ACTION_TYPES, DOC_OPERATIONS, OPERATION_FIELD
 from mcp_connector.infrastructure.policy_source import clear_cache
 from mcp_connector.infrastructure.settings import load_settings
 from mcp_connector.tests import fixtures
+
+
+def reset_caches():
+	"""Redis caches survive a DB rollback, so drop anything a test may have cached."""
+	clear_cache()
+	frappe.clear_document_cache("MCP Settings", "MCP Settings")
 
 
 class McpTestCase(FrappeTestCase):
@@ -16,8 +22,8 @@ class McpTestCase(FrappeTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		fixtures.ensure_all()
-		clear_cache()
-		cls.addClassCleanup(clear_cache)  # runs before FrappeTestCase's rollback
+		reset_caches()
+		cls.addClassCleanup(reset_caches)  # registered last, so it runs before FrappeTestCase's rollback
 
 	def setUp(self):
 		frappe.set_user("Administrator")
@@ -43,7 +49,7 @@ class McpTestCase(FrappeTestCase):
 				"doctypes": [
 					{
 						"document_type": row["doctype"],
-						**{OPERATION_FIELD[op]: 1 for op in row.get("ops", ("Read",))},
+						**{OPERATION_FIELD[op]: int(op in row.get("ops", ("Read",))) for op in DOC_OPERATIONS},
 						"field_mode": row.get("field_mode", "All Fields"),
 						"field_list": row.get("field_list", ""),
 						"scope_filters": row.get("scope", ""),
@@ -55,7 +61,7 @@ class McpTestCase(FrappeTestCase):
 					{"report": row["report"], "fixed_filters": row.get("fixed", ""), "notes": row.get("notes", "")}
 					for row in reports
 				],
-				**{ACTION_TYPE_FIELD[t]: 1 for t in types},
+				**{ACTION_TYPE_FIELD[t]: int(t in types) for t in ACTION_TYPES},
 			}
 		)
 		doc.insert(ignore_permissions=True)

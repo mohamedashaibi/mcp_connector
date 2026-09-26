@@ -11,10 +11,12 @@ import frappe
 SALES_ROLE = "MCP Test Sales"
 VIEWER_ROLE = "MCP Test Viewer"
 ORPHAN_ROLE = "MCP Test Orphan"
+CAPPED_ROLE = "MCP Test Capped"
 
 SALES_USER = "mcp-sales@example.com"
 VIEWER_USER = "mcp-viewer@example.com"
 ORPHAN_USER = "mcp-orphan@example.com"
+CAPPED_USER = "mcp-capped@example.com"
 
 ORDER = "MCP Test Order"
 ORDER_ITEM = "MCP Test Order Item"
@@ -31,7 +33,7 @@ def _ensure(doctype: str, name: str, values: dict):
 
 
 def ensure_roles():
-	for role in (SALES_ROLE, VIEWER_ROLE, ORPHAN_ROLE):
+	for role in (SALES_ROLE, VIEWER_ROLE, ORPHAN_ROLE, CAPPED_ROLE):
 		_ensure("Role", role, {"role_name": role, "desk_access": 1})
 
 
@@ -40,6 +42,7 @@ def ensure_users():
 		(SALES_USER, "Sally Sales", SALES_ROLE),
 		(VIEWER_USER, "Victor Viewer", VIEWER_ROLE),
 		(ORPHAN_USER, "Olga Orphan", ORPHAN_ROLE),
+		(CAPPED_USER, "Casey Capped", CAPPED_ROLE),
 	):
 		if not frappe.db.exists("User", email):
 			user = frappe.get_doc(
@@ -50,7 +53,9 @@ def ensure_users():
 
 
 def _perm(role, **flags):
-	return {"role": role, "read": 1, "report": 1, **flags}
+	# DocPerm defaults write/create/delete to 1, so every flag is spelled out.
+	base = {"read": 1, "report": 1, "write": 0, "create": 0, "delete": 0, "submit": 0, "cancel": 0, "amend": 0}
+	return {"role": role, **base, **flags}
 
 
 def ensure_doctypes():
@@ -101,6 +106,7 @@ def ensure_doctypes():
 				{"role": "System Manager", "permlevel": 1, "read": 1, "write": 1},
 				_perm(SALES_ROLE, write=1, create=1, delete=1, submit=1, cancel=1, amend=1),
 				_perm(VIEWER_ROLE),
+				_perm(CAPPED_ROLE, write=1, create=1),
 			],
 		},
 	)

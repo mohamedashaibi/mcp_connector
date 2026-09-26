@@ -27,8 +27,8 @@ export const benchShell = (script, opts) =>
 export function execute(method, kwargs) {
 	const args = kwargs ? ` --kwargs '${JSON.stringify(kwargs).replace(/'/g, "'\\''")}'` : "";
 	const res = benchShell(`bench --site ${SITE} execute ${method}${args}`);
-	const lines = res.stdout.trim().split("\n");
-	return JSON.parse(lines[lines.length - 1]);
+	const last = res.stdout.trim().split("\n").pop();
+	return last ? JSON.parse(last) : null; // bench prints nothing for falsy return values
 }
 
 export async function waitForHttp(url = `${BASE_URL}/api/method/ping`, timeoutMs = 120000) {

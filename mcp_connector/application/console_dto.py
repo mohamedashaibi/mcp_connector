@@ -20,7 +20,7 @@ def _obj(value: Any, what: str, allowed: set, required: set = frozenset()) -> di
 	unknown = sorted(set(value) - allowed)
 	if unknown:
 		raise InvalidArguments(f"Unexpected field(s) in {what}: {', '.join(unknown)}")
-	missing = sorted(k for k in required if value.get(k) in (None, ""))
+	missing = sorted(k for k in required if k not in value)
 	if missing:
 		raise InvalidArguments(f"Missing {', '.join(missing)} in {what}")
 	return value

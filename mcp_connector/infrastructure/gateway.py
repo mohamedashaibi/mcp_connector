@@ -27,7 +27,7 @@ def clean_message(value: Any) -> str:
 
 
 def _exception_message(exc: Exception) -> str:
-	message = clean_message(exc)
+	message = "" if isinstance(exc, frappe.MandatoryError) else clean_message(exc)
 	if not message:
 		log = getattr(frappe.local, "message_log", None) or []
 		if log:

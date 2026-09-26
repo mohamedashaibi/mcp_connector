@@ -25,8 +25,14 @@ from mcp_connector.infrastructure.gateway import LAYOUT_TYPES, FrappeErpGateway
 MANAGER_ROLES = ("System Manager", "MCP Manager")
 
 
+def _require_roles(roles) -> None:
+	# Explicit on purpose: frappe.only_for() is a no-op under test and for Administrator.
+	if frappe.session.user == "Guest" or not set(roles).intersection(frappe.get_roles()):
+		raise frappe.PermissionError(_("You need one of these roles: {0}").format(", ".join(roles)))
+
+
 def _require_manager():
-	frappe.only_for(MANAGER_ROLES)
+	_require_roles(MANAGER_ROLES)
 
 
 def _run(fn, *args):
@@ -193,5 +199,5 @@ def log_detail(name):
 @frappe.whitelist(methods=["POST"])
 def generate_keys(user):
 	# Frappe itself only lets System Managers (re)generate API secrets.
-	frappe.only_for("System Manager")
+	_require_roles(("System Manager",))
 	return _run(uc.GenerateKeys(FrappeDirectory()).execute, user)
