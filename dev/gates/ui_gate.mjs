@@ -30,7 +30,7 @@ async function session({ theme = "Light", width = 1440, usr = "Administrator", p
 	const login = await page.request.post(`${BASE_URL}/api/method/login`, { form: { usr, pwd } });
 	check(login.ok(), `login failed for ${usr}`);
 	await page.request.post(`${BASE_URL}/api/method/frappe.core.doctype.user.user.switch_theme`, { form: { theme } });
-	const start = console_page ? "/app/mcp-console" : "/app/home";
+	const start = console_page ? "/app/mcp-console" : "/app";
 	await page.goto(`${BASE_URL}${start}`, { waitUntil: "networkidle" });
 	await page.waitForTimeout(2000); // first desk boot clears its cache and reloads once
 	await page.goto(`${BASE_URL}${start}`, { waitUntil: "networkidle" });
@@ -248,9 +248,9 @@ for (const [theme, width, label] of [["Dark", 1440, "dark-desktop"], ["Light", 1
 
 // ---------------------------------------------------------------- only the Administrator sees the connector
 const sidebar_has_connector = async (page) => {
-	await page.goto(`${BASE_URL}/app/home`, { waitUntil: "networkidle" });
-	await page.locator(".desk-sidebar .sidebar-item-label").first().waitFor({ timeout: 15000 });
-	return (await page.locator(".desk-sidebar .sidebar-item-label", { hasText: /^MCP Connector$/ }).count()) > 0;
+	await page.goto(`${BASE_URL}/app`, { waitUntil: "networkidle" }); // the user's default workspace
+	await page.locator(".layout-side-section .sidebar-item-container[item-name]").first().waitFor({ timeout: 15000 });
+	return (await page.locator('.layout-side-section .sidebar-item-container[item-name="MCP Connector"]').count()) > 0;
 };
 {
 	const admin = await session({ console_page: false });
