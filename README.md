@@ -409,6 +409,7 @@ node dev/gates/integration_gate.mjs   # Frappe integration suite (add --bench v1
 cd dev && npm install && cd ..        # once, for the next two gates
 node dev/gates/mcp_e2e_gate.mjs       # official MCP SDK client over HTTP
 node dev/gates/ui_gate.mjs            # console in Chromium: full workflow, light/dark/narrow
+node dev/gates/upgrade_gate.mjs       # v14 site -> backup, restore on v15, migrate; data kept
 node dev/bench.mjs down               # remove everything (per bench)
 ```
 

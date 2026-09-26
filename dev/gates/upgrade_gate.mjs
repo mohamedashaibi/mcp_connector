@@ -24,8 +24,9 @@ const snapshot = (v, site) => ({
 	),
 	actions: query(v, site, "frappe.get_all", { doctype: "MCP Action", fields: ["name", "enabled", "action_type"], order_by: "name asc" }),
 	audit_entries: query(v, site, "frappe.db.count", { dt: "MCP Audit Log" }),
-	settings: (query(v, site, "frappe.get_all", { doctype: "Singles", filters: { doctype: "MCP Settings" }, fields: ["field", "value"], order_by: "field asc" }) || [])
-		.filter((r) => !AUDIT_FIELDS.includes(r.field)),
+	settings: Object.entries(query(v, site, "frappe.db.get_singles_dict", { doctype: "MCP Settings" }) || {})
+		.filter(([field]) => !AUDIT_FIELDS.includes(field))
+		.sort(([a], [b]) => a.localeCompare(b)),
 	permission_roles: [...new Set((query(v, site, "frappe.get_all", { doctype: "DocPerm", filters: { parent: ["in", ADMIN_ONLY] }, pluck: "role" }) || []))],
 });
 
@@ -44,7 +45,12 @@ try {
 		.pop();
 	shell("v15", "base64 -d > /tmp/mcp-upgrade.sql.gz", { input: backup });
 	shell("v15", `bench drop-site ${TARGET_SITE} --root-password admin --force --no-backup >/dev/null 2>&1 || true`, { allowFail: true });
-	const restore = shell("v15", `bench --site ${TARGET_SITE} restore /tmp/mcp-upgrade.sql.gz --db-root-password admin --admin-password admin 2>&1`, { allowFail: true });
+	const restore = shell(
+		"v15",
+		`bench new-site ${TARGET_SITE} --mariadb-root-password admin --admin-password admin --no-mariadb-socket >/dev/null 2>&1 && ` +
+			`bench --site ${TARGET_SITE} restore /tmp/mcp-upgrade.sql.gz --db-root-password admin 2>&1`,
+		{ allowFail: true }
+	);
 	if (restore.status !== 0) failures.push(`restore on v15 failed:\n${restore.stdout.slice(-3000)}`);
 	const migrate = shell("v15", `bench --site ${TARGET_SITE} migrate 2>&1`, { allowFail: true });
 	if (migrate.status !== 0) failures.push(`migrate on v15 failed:\n${migrate.stdout.slice(-3000)}`);
