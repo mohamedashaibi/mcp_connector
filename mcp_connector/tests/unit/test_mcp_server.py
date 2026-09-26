@@ -17,6 +17,7 @@ from mcp_connector.domain.catalog import BUILTIN_TOOLS
 from mcp_connector.domain.jsonrpc import INVALID_PARAMS, METHOD_NOT_FOUND
 from mcp_connector.domain.policy import (
 	EXCLUDE_LISTED,
+	ONLY_LISTED,
 	ActionSpec,
 	DoctypeRule,
 	FieldRule,
@@ -72,7 +73,13 @@ def build_gateway():
 			"Sales Invoice Item": (field("item_code", "Link"), field("qty", "Float"), field("amount", "Currency", read_only=True)),
 		},
 	)
-	gw.add_doctype("Purchase Order", [field("supplier", "Link"), field("workflow_state", "Link", read_only=True)], is_submittable=True, has_workflow=True)
+	gw.add_doctype(
+		"Purchase Order",
+		[field("supplier", "Link"), field("workflow_state", "Link")],
+		is_submittable=True,
+		has_workflow=True,
+		workflow_state_field="workflow_state",
+	)
 	gw.add_doctype("Selling Settings", [field("cust_master_name", "Select")], issingle=True)
 	gw.add_doctype("MCP Profile", [field("profile_name")])
 	gw.add_doctype("User", [field("full_name")])
@@ -100,6 +107,10 @@ def build_gateway():
 		{"name": "SINV-2", "company": "Globex"},
 	])
 	gw.reports["Secret Report"] = (report("Secret Report"), [])
+	gw.reports["Invoice Builder"] = (
+		report("Invoice Builder", "Report Builder", ref_doctype="Sales Invoice", filterable=frozenset({"name", "customer"})),
+		[{"name": "SINV-1", "customer": "CUST-1"}],
+	)
 	gw.reports["Forbidden Report"] = (report("Forbidden Report", permitted=False), [])
 	gw.methods["erpnext.stock.utils.get_stock_balance"] = lambda item_code: {"item_code": item_code, "qty": 42}
 	return gw
@@ -494,7 +505,8 @@ class TestMultiProfileAndAudit(unittest.TestCase):
 		h = Harness(profiles=(acme, globex), user="u", roles=())
 		data = h.call("list_documents", doctype="Sales Invoice", order_by="grand_total desc", limit=5)["data"]
 		self.assertEqual([r["name"] for r in data["data"]], ["SINV-3", "SINV-2", "SINV-1"])
-		self.assertEqual(h.call("count_documents", doctype="Sales Invoice")["data"]["count"], 3)
+		# Only the ACME profile enables count_documents, so only its rows are counted.
+		self.assertEqual(h.call("count_documents", doctype="Sales Invoice")["data"]["count"], 2)
 
 	def test_auditor_sees_everything_read_only(self):
 		h = Harness(user="auditor@x.com", roles=())
@@ -527,6 +539,112 @@ class TestMultiProfileAndAudit(unittest.TestCase):
 		h = Harness(settings=ServerSettings(log_arguments=False))
 		h.call("list_doctypes")
 		self.assertIsNone(h.audit.entries[-1].arguments)
+
+
+def _p(name, types, actions, doctypes=(), reports=()):
+	return ProfileSpec(name, users=frozenset({"u"}), action_types=frozenset(types), actions=frozenset(actions), doctypes=tuple(doctypes), reports=tuple(reports))
+
+
+class TestReviewRegressions(unittest.TestCase):
+	"""Scenarios from the independent security review: profiles are alternatives, never blended."""
+
+	def test_fields_of_one_profile_never_apply_to_rows_of_another(self):
+		a = _p("A", {READ}, {"get_document", "list_documents"}, [DoctypeRule("Customer", frozenset({READ}), scope=(("territory", "=", "North"),))])
+		b = _p("B", {READ}, {"get_document", "list_documents"}, [DoctypeRule("Customer", frozenset({READ}), FieldRule(ONLY_LISTED, frozenset({"customer_name"})))])
+		h = Harness(profiles=(a, b), user="u", roles=())
+		south = h.call("get_document", doctype="Customer", name="CUST-2")["data"]
+		self.assertEqual(south.get("customer_name"), "Beta")
+		self.assertNotIn("territory", south)
+		self.assertNotIn("credit_limit", south)
+		north = h.call("get_document", doctype="Customer", name="CUST-1")["data"]
+		self.assertEqual(north["credit_limit"], 5000)
+		rows = h.call("list_documents", doctype="Customer", fields=["name", "credit_limit"])["data"]["data"]
+		self.assertEqual([r["name"] for r in rows], ["CUST-1"])  # credit_limit is only visible under A's scope
+		self.assertEqual(len(h.call("list_documents", doctype="Customer", fields=["name", "customer_name"])["data"]["data"]), 2)
+
+	def test_write_needs_one_profile_covering_fields_and_record(self):
+		a = _p("A", {READ, UPDATE}, {"update_document"}, [DoctypeRule("Customer", frozenset({UPDATE}), FieldRule(ONLY_LISTED, frozenset({"territory"})))])
+		b = _p("B", {READ, UPDATE}, {"update_document"}, [DoctypeRule("Customer", frozenset({UPDATE}), scope=(("territory", "=", "North"),))])
+		h = Harness(profiles=(a, b), user="u", roles=())
+		denied = h.call("update_document", doctype="Customer", name="CUST-2", data={"credit_limit": 1})
+		self.assertTrue(denied["isError"])
+		self.assertEqual(h.gateway.docs["Customer"]["CUST-2"]["credit_limit"], 100)
+		self.assertFalse(h.call("update_document", doctype="Customer", name="CUST-2", data={"territory": "West"})["isError"])
+		self.assertFalse(h.call("update_document", doctype="Customer", name="CUST-1", data={"credit_limit": 9})["isError"])
+
+	def test_tool_from_one_profile_does_not_combine_with_grant_from_another(self):
+		a = _p("A", {READ, DELETE}, {"delete_document", "list_documents"})
+		b = _p("B", {READ, DELETE}, {"list_documents"}, [DoctypeRule("Customer", frozenset({READ, DELETE}))])
+		h = Harness(profiles=(a, b), user="u", roles=())
+		self.assertNotIn("delete_document", h.tools())
+		response = h.rpc("tools/call", {"name": "delete_document", "arguments": {"doctype": "Customer", "name": "CUST-1"}})
+		self.assertIn("error", response)
+		self.assertIn("CUST-1", h.gateway.docs["Customer"])
+
+	def test_workflow_submit_needs_submit_grant_in_scope(self):
+		upd = _p("Upd", {READ, UPDATE}, {"apply_workflow_action"}, [DoctypeRule("Purchase Order", frozenset({UPDATE}))])
+		sub = _p("Sub", {READ, SUBMIT}, {"apply_workflow_action"}, [DoctypeRule("Purchase Order", frozenset({SUBMIT}), scope=(("supplier", "=", "S2"),))])
+		h = Harness(profiles=(upd, sub), user="u", roles=())
+		result = h.call("apply_workflow_action", doctype="Purchase Order", name="PO-1", action="Approve")
+		self.assertTrue(result["isError"])
+		self.assertEqual(h.gateway.docs["Purchase Order"]["PO-1"]["docstatus"], 0)
+
+	def test_workflow_submit_grant_must_come_from_the_updating_profile(self):
+		# Update from one profile, Submit from another: neither alone allows submitting.
+		upd = _p("Upd", {READ, UPDATE}, {"apply_workflow_action"}, [DoctypeRule("Purchase Order", frozenset({UPDATE}))])
+		sub = _p("Sub", {READ, SUBMIT}, {"apply_workflow_action"}, [DoctypeRule("Purchase Order", frozenset({SUBMIT}))])
+		h = Harness(profiles=(upd, sub), user="u", roles=())
+		self.assertTrue(h.call("apply_workflow_action", doctype="Purchase Order", name="PO-1", action="Approve")["isError"])
+		both = _p("Both", {READ, UPDATE, SUBMIT}, {"apply_workflow_action"}, [DoctypeRule("Purchase Order", frozenset({UPDATE, SUBMIT}))])
+		h = Harness(profiles=(both,), user="u", roles=())
+		self.assertFalse(h.call("apply_workflow_action", doctype="Purchase Order", name="PO-1", action="Approve")["isError"])
+
+	def test_write_response_needs_a_profile_that_reads_records(self):
+		# The only Read grant comes from a profile without get_document: nothing is echoed back.
+		read = _p("R", {READ}, {"list_doctypes"}, [DoctypeRule("Customer", frozenset({READ}))])
+		upd = _p("U", {UPDATE}, {"update_document"}, [DoctypeRule("Customer", frozenset({UPDATE}))])
+		h = Harness(profiles=(read, upd), user="u", roles=())
+		data = h.call("update_document", doctype="Customer", name="CUST-1", data={"territory": "East"})["data"]
+		self.assertEqual(set(data), {"doctype", "name", "docstatus"})
+
+	def test_list_doctypes_only_lists_operations_a_tool_can_perform(self):
+		p = _p("P", {READ, DELETE}, {"list_doctypes", "list_documents"}, [DoctypeRule("Customer", frozenset({READ, DELETE}))])
+		rows = Harness(profiles=(p,), user="u", roles=()).call("list_doctypes")["data"]["doctypes"]
+		self.assertEqual(rows[0]["operations"], [READ])  # Delete is granted but delete_document is not enabled
+
+	def test_write_response_respects_read_scope(self):
+		read = _p("R", {READ}, {"get_document"}, [DoctypeRule("Sales Invoice", frozenset({READ}), scope=(("company", "=", "ACME"),))])
+		upd = _p("U", {UPDATE}, {"update_document"}, [DoctypeRule("Sales Invoice", frozenset({UPDATE}))])
+		h = Harness(profiles=(read, upd), user="u", roles=())
+		data = h.call("update_document", doctype="Sales Invoice", name="SINV-2", data={"customer": "CUST-1"})["data"]
+		self.assertEqual(set(data), {"doctype", "name", "docstatus"})
+		acme = h.call("update_document", doctype="Sales Invoice", name="SINV-1", data={"customer": "CUST-2"})["data"]
+		self.assertEqual(acme["customer"], "CUST-2")
+
+	def test_workflow_doctypes_cannot_be_submitted_or_state_set_directly(self):
+		p = _p(
+			"W",
+			{READ, UPDATE, SUBMIT},
+			{"submit_document", "update_document"},
+			[DoctypeRule("Purchase Order", frozenset({READ, UPDATE, SUBMIT}))],
+		)
+		h = Harness(profiles=(p,), user="u", roles=())
+		self.assertIn("apply_workflow_action", h.call("submit_document", doctype="Purchase Order", name="PO-1")["text"])
+		state = h.call("update_document", doctype="Purchase Order", name="PO-1", data={"workflow_state": "Approved"})
+		self.assertTrue(state["isError"])
+		self.assertEqual(h.gateway.docs["Purchase Order"]["PO-1"]["workflow_state"], "Pending")
+
+	def test_deep_paging_across_scopes_is_bounded(self):
+		a = _p("A", {READ}, {"list_documents"}, [DoctypeRule("Sales Invoice", frozenset({READ}), scope=(("company", "=", "ACME"),))])
+		b = _p("B", {READ}, {"list_documents"}, [DoctypeRule("Sales Invoice", frozenset({READ}), scope=(("company", "=", "Globex"),))])
+		h = Harness(profiles=(a, b), user="u", roles=())
+		self.assertTrue(h.call("list_documents", doctype="Sales Invoice", start=9_999_999)["isError"])
+
+	def test_report_builder_filters_limited_to_report_columns(self):
+		p = _p("R", {REPORT}, {"run_report"}, reports=[ReportRule("Invoice Builder")])
+		h = Harness(profiles=(p,), user="u", roles=())
+		self.assertTrue(h.call("run_report", report_name="Invoice Builder", filters={"grand_total": [">", 150]})["isError"])
+		self.assertFalse(h.call("run_report", report_name="Invoice Builder", filters={"customer": "CUST-1"})["isError"])
 
 
 if __name__ == "__main__":

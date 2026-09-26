@@ -19,11 +19,25 @@ from mcp_connector.domain.policy import (
 	parse_field_list,
 )
 
-CACHE_KEY = "mcp_connector:policy:v1"
+CACHE_KEY = "mcp_connector:policy:v2"
+CACHE_SECONDS = 3600
 
 
 def clear_cache(*args, **kwargs) -> None:
-	frappe.cache().delete_value(CACHE_KEY)
+	frappe.cache().delete_keys(CACHE_KEY)
+
+
+def _version() -> str:
+	"""Changes whenever a profile or action is saved, added or removed -- read in the same
+	transaction as the data, so a snapshot can never be cached under a newer version."""
+	from frappe.query_builder.functions import Count, Max
+
+	parts = []
+	for doctype in ("MCP Profile", "MCP Action"):
+		table = frappe.qb.DocType(doctype)
+		count, latest = frappe.qb.from_(table).select(Count("*"), Max(table.modified)).run()[0]
+		parts.append(f"{count}:{latest}")
+	return "|".join(parts)
 
 
 def _loads(raw, default):
@@ -150,7 +164,8 @@ def spec_from_action(record: dict) -> ActionSpec:
 
 
 def _snapshot() -> dict:
-	data = frappe.cache().get_value(CACHE_KEY)
+	key = f"{CACHE_KEY}:{_version()}"
+	data = frappe.cache().get_value(key)
 	if data is None:
 		profiles = [profile_record(frappe.get_doc("MCP Profile", n)) for n in frappe.get_all("MCP Profile", pluck="name")]
 		actions = [
@@ -172,7 +187,7 @@ def _snapshot() -> dict:
 			)
 		]
 		data = {"profiles": profiles, "actions": actions}
-		frappe.cache().set_value(CACHE_KEY, data)
+		frappe.cache().set_value(key, data, expires_in_sec=CACHE_SECONDS)
 	return data
 
 

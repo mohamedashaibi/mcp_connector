@@ -50,6 +50,31 @@ class TestInstallation(McpTestCase):
 		self.assertFalse(frappe.db.exists("MCP Audit Log", old))
 		self.assertTrue(frappe.db.exists("MCP Audit Log", {"tool": "new_entry"}))
 
+	def test_failed_work_drops_queued_side_effects(self):
+		from mcp_connector.infrastructure.uow import FrappeUnitOfWork
+
+		frappe.flags.enqueue_after_commit = [{"job": "before"}]
+		frappe.local.realtime_log = []
+
+		def work():
+			frappe.get_doc({"doctype": "ToDo", "description": "rolled back"}).insert()
+			frappe.flags.enqueue_after_commit.append({"job": "webhook for a doc that will not exist"})
+			frappe.local.realtime_log.append(["list_update", {}, None, None, None])
+			raise RuntimeError("scope check failed")
+
+		with self.assertRaises(RuntimeError):
+			FrappeUnitOfWork().atomic(work)
+		self.assertEqual(frappe.flags.enqueue_after_commit, [{"job": "before"}])
+		self.assertEqual(frappe.local.realtime_log, [])
+		self.assertFalse(frappe.db.exists("ToDo", {"description": "rolled back"}))
+		frappe.flags.enqueue_after_commit = []
+
+	def test_policy_cache_follows_committed_data_without_explicit_clear(self):
+		self.make_profile("Stamp Probe", users=["Administrator"])
+		self.assertTrue(next(p for p in load_profiles() if p.name == "Stamp Probe").enabled)
+		frappe.db.set_value("MCP Profile", "Stamp Probe", "enabled", 0)  # bypasses controller hooks
+		self.assertFalse(next(p for p in load_profiles() if p.name == "Stamp Probe").enabled)
+
 	def test_policy_cache_refreshes_after_profile_save(self):
 		load_profiles()
 		self.make_profile("Cache Probe", users=["Administrator"])

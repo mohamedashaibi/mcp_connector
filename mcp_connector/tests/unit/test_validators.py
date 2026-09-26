@@ -89,15 +89,18 @@ class TestFilters(unittest.TestCase):
 	def test_parse_order_by(self):
 		self.assertEqual(parse_order_by(None, ALLOWED), (("modified", "desc"),))
 		self.assertEqual(parse_order_by("grand_total DESC, name", ALLOWED), (("grand_total", "desc"), ("name", "asc")))
-		self.assertEqual(order_by_sql((("grand_total", "desc"),)), "`grand_total` desc")
+		self.assertEqual(order_by_sql((("grand_total", "desc"),)), "`grand_total` desc, `name` asc")
+		self.assertEqual(order_by_sql((("name", "desc"),)), "`name` desc")
 		for bad in ("(select 1)", "name; drop", "salary desc", "a,b,c,d", 5):
 			with self.assertRaises(InvalidArguments):
 				parse_order_by(bad, ALLOWED)
 
 	def test_sort_rows_matches_database_order(self):
-		rows = [{"n": "b", "v": 2}, {"n": "a", "v": None}, {"n": "c", "v": 10}]
-		self.assertEqual([r["n"] for r in sort_rows(rows, (("v", "asc"),))], ["a", "b", "c"])
-		self.assertEqual([r["n"] for r in sort_rows(rows, (("v", "desc"),))], ["c", "b", "a"])
+		rows = [{"name": "b", "v": 2}, {"name": "a", "v": None}, {"name": "c", "v": 10}]
+		self.assertEqual([r["name"] for r in sort_rows(rows, (("v", "asc"),))], ["a", "b", "c"])
+		self.assertEqual([r["name"] for r in sort_rows(rows, (("v", "desc"),))], ["c", "b", "a"])
+		mixed_case = [{"name": "2", "t": "beta"}, {"name": "1", "t": "Alpha"}, {"name": "3", "t": "alpha"}]
+		self.assertEqual([r["name"] for r in sort_rows(mixed_case, (("t", "asc"),))], ["1", "3", "2"])  # case-insensitive, name breaks ties
 
 	def test_clamp_int(self):
 		self.assertEqual(clamp_int(None, "limit", 20, 1, 100), 20)

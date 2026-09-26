@@ -70,6 +70,24 @@ READ_ONLY = frozenset(
 		"Installed Applications",
 		"Domain Settings",
 		"Log Settings",
+		# HTML / Jinja / script-bearing or sharing and automation rules
+		"Website Settings",
+		"Portal Settings",
+		"Navbar Settings",
+		"Web Template",
+		"Print Style",
+		"Letter Head",
+		"Address Template",
+		"Terms and Conditions",
+		"Translation",
+		"DocShare",
+		"Assignment Rule",
+		"Energy Point Rule",
+		"Dashboard Chart Source",
+		"Number Card",
+		"Workspace",
+		"Email Account",
+		"Email Domain",
 	}
 )
 

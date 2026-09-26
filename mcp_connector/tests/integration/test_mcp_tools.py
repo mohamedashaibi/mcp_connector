@@ -48,7 +48,10 @@ class TestMcpTools(McpTestCase):
 				},
 				{"doctype": F.REQUEST, "ops": ("Read", "Update")},
 			],
-			reports=[{"report": F.REPORT, "fixed": '{"company": "ACME"}', "notes": "Pinned to ACME"}],
+			reports=[
+				{"report": F.REPORT, "fixed": '{"company": "ACME"}', "notes": "Pinned to ACME"},
+				{"report": F.BUILDER_REPORT},
+			],
 		)
 		cls.make_profile(
 			"Test Viewer",
@@ -68,7 +71,7 @@ class TestMcpTools(McpTestCase):
 			self.assertIn(name, tools)
 		self.assertEqual(tools["list_documents"]["inputSchema"]["properties"]["doctype"]["enum"], [F.ORDER, F.REQUEST])
 		self.assertEqual(tools["delete_document"]["inputSchema"]["properties"]["doctype"]["enum"], [F.ORDER])
-		self.assertEqual(tools["run_report"]["inputSchema"]["properties"]["report_name"]["enum"], [F.REPORT])
+		self.assertEqual(tools["run_report"]["inputSchema"]["properties"]["report_name"]["enum"], sorted([F.BUILDER_REPORT, F.REPORT]))
 
 	def test_erp_role_permissions_narrow_the_profile(self):
 		tools = self.tools(F.VIEWER_USER)
@@ -224,7 +227,7 @@ class TestMcpTools(McpTestCase):
 	# -- reports -------------------------------------------------------------
 	def test_reports(self):
 		listed = self.call(F.SALES_USER, "list_reports").data["reports"]
-		self.assertEqual([r["report_name"] for r in listed], [F.REPORT])
+		self.assertEqual(sorted(r["report_name"] for r in listed), sorted([F.REPORT, F.BUILDER_REPORT]))
 		described = self.call(F.SALES_USER, "describe_report", report_name=F.REPORT).data
 		self.assertEqual(described["filters"][0]["fieldname"], "company")
 		self.assertEqual(described["fixed_filters"], {"company": "ACME"})
@@ -236,6 +239,16 @@ class TestMcpTools(McpTestCase):
 		self.assertEqual([c["fieldname"] for c in run.data["columns"]], ["order", "company", "amount"])
 		self.assertTrue(all(row["company"] == "ACME" for row in run.data["rows"]))
 		self.assertNotIn(self.globex, [row["order"] for row in run.data["rows"]])
+
+	def test_report_builder_report(self):
+		run = self.call(F.SALES_USER, "run_report", report_name=F.BUILDER_REPORT, filters={"customer": "Alpha"})
+		self.assertFalse(run.error, run.text)
+		self.assertEqual([c["fieldname"] for c in run.data["columns"]], ["name", "customer", "company"])
+		self.assertTrue(run.data["rows"])
+		self.assertTrue(all(row["customer"] == "Alpha" for row in run.data["rows"]))
+		probe = self.call(F.SALES_USER, "run_report", report_name=F.BUILDER_REPORT, filters={"secret_note": ["like", "%"]})
+		self.assertTrue(probe.error)
+		self.assertIn("only be filtered on its columns", probe.text)
 
 	# -- custom actions, controls and audit ----------------------------------
 	def test_custom_actions(self):
@@ -265,3 +278,42 @@ class TestMcpTools(McpTestCase):
 		self.assertIn(REDACTED, entry.arguments)
 		self.assertNotIn("hunter2", entry.arguments)
 		self.assertIn("Test Sales Agent", entry.profiles)
+
+
+class TestProfileAlternatives(McpTestCase):
+	"""Two profiles for one role must not blend: fields of one never apply to rows of the other."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.make_profile(
+			"Alt Scoped",
+			roles=[F.VIEWER_ROLE],
+			actions=["get_document", "list_documents"],
+			doctypes=[{"doctype": F.ORDER, "scope": '{"company": "ACME"}'}],
+		)
+		cls.make_profile(
+			"Alt Narrow",
+			roles=[F.VIEWER_ROLE],
+			actions=["get_document", "list_documents"],
+			doctypes=[{"doctype": F.ORDER, "field_mode": "Only Listed Fields", "field_list": "customer"}],
+		)
+		cls.acme = F.make_order("Alt Acme", "ACME", 111).name
+		cls.globex = F.make_order("Alt Globex", "Globex", 999).name
+
+	def test_fields_follow_the_profile_that_covers_the_record(self):
+		acme = self.call(F.VIEWER_USER, "get_document", doctype=F.ORDER, name=self.acme).data
+		self.assertEqual(acme["amount"], 111)
+		globex = self.call(F.VIEWER_USER, "get_document", doctype=F.ORDER, name=self.globex).data
+		self.assertEqual(globex["customer"], "Alt Globex")
+		self.assertNotIn("amount", globex)
+		self.assertNotIn("company", globex)
+
+	def test_listing_hidden_fields_only_returns_rows_of_the_profile_showing_them(self):
+		rows = self.call(F.VIEWER_USER, "list_documents", doctype=F.ORDER, fields=["name", "amount"], limit=100).data["data"]
+		names = [r["name"] for r in rows]
+		self.assertIn(self.acme, names)
+		self.assertNotIn(self.globex, names)
+		everyone = self.call(F.VIEWER_USER, "list_documents", doctype=F.ORDER, fields=["name", "customer"], limit=100).data["data"]
+		self.assertIn(self.globex, [r["name"] for r in everyone])

@@ -1,14 +1,13 @@
-"""Access policy: which profiles apply to a user and what they jointly allow.
+"""Access policy: which profiles apply to a user and what they allow.
 
 Deny by default. A user gets MCP access only through enabled profiles that
-list one of their roles or the user directly. Grants from several profiles are
-unioned, the way Frappe unions role permissions:
+list one of their roles or the user directly.
 
-* a tool is usable when some matching profile enables the tool *and* its action type;
-* a DocType operation is usable when some matching profile ticks it on the DocType
-  row *and* enables that action type;
-* field visibility and row scope are combined across the profiles that grant the
-  same DocType operation (see FieldRule.union and DoctypeGrant.scopes).
+Several matching profiles are alternatives, never blended: a call is allowed
+when ONE profile allows all of it together -- the tool, its action type, the
+DocType operation, the requested fields and the record's scope. Mixing one
+profile's fields with another profile's rows (or one profile's tool with
+another profile's DocType grant) would grant access no profile describes.
 
 Frappe's own role and user permissions are always checked on top of this;
 a profile can only narrow what a user could already do.
@@ -110,14 +109,22 @@ class ActionSpec:
 
 
 @dataclass(frozen=True)
-class DoctypeGrant:
-	"""The merged permission for one (doctype, operation) pair."""
+class Grant:
+	"""One profile's permission for one (doctype, operation) pair."""
 
+	profile: str
 	doctype: str
 	operation: str
 	field_rule: FieldRule
-	scopes: Optional[tuple]  # None = unrestricted, else OR of condition conjunctions
-	notes: tuple = ()
+	scope: tuple = ()  # conjunction of conditions; () = every record
+	notes: str = ""
+
+
+def union_rules(grants) -> Optional[FieldRule]:
+	result = None
+	for grant in grants:
+		result = grant.field_rule if result is None else result.union(grant.field_rule)
+	return result
 
 
 @dataclass(frozen=True)
@@ -145,35 +152,39 @@ class ReportGrant:
 
 
 class EffectivePolicy:
-	"""Everything one user may do over MCP, resolved from their matching profiles."""
+	"""Everything one user may do over MCP, kept per matching profile."""
 
 	def __init__(self, user: str, profiles: list, actions: dict):
 		self.user = user
 		self.profiles = tuple(p.name for p in profiles)
 		self.action_types = frozenset().union(*(p.action_types for p in profiles)) if profiles else frozenset()
 
-		tools = set()
+		# Tools each profile makes usable: selected, enabled globally, action type on.
+		self._profile_tools = {}
 		for profile in profiles:
-			for name in profile.actions:
-				action = actions.get(name)
-				if action and action.enabled and action.action_type in profile.action_types:
-					tools.add(name)
-		self.tools = frozenset(tools)
+			self._profile_tools[profile.name] = frozenset(
+				name
+				for name in profile.actions
+				if (action := actions.get(name)) and action.enabled and action.action_type in profile.action_types
+			)
+		self.tools = frozenset().union(*self._profile_tools.values()) if profiles else frozenset()
 
-		# doctype -> operation -> [DoctypeRule, ...] (only rows whose action type is on)
-		self._rules: dict = {}
+		# (doctype, operation) -> [Grant, ...], one per granting profile (action type must be on)
+		self._grants: dict = {}
 		for profile in profiles:
 			for rule in profile.doctypes:
 				for operation in rule.operations:
 					if operation in profile.action_types:
-						self._rules.setdefault(rule.doctype, {}).setdefault(operation, []).append(rule)
+						self._grants.setdefault((rule.doctype, operation), []).append(
+							Grant(profile.name, rule.doctype, operation, rule.field_rule, tuple(rule.scope), rule.notes)
+						)
 
+		# report -> [(profile, ReportRule), ...] for profiles with the Report type on
 		self._reports: dict = {}
 		for profile in profiles:
-			if REPORT not in profile.action_types:
-				continue
-			for rule in profile.reports:
-				self._reports.setdefault(rule.report, []).append(rule)
+			if REPORT in profile.action_types:
+				for rule in profile.reports:
+					self._reports.setdefault(rule.report, []).append((profile.name, rule))
 
 	@property
 	def is_empty(self) -> bool:
@@ -182,46 +193,39 @@ class EffectivePolicy:
 	def allows_tool(self, name: str) -> bool:
 		return name in self.tools
 
+	def _has_tool(self, profile: str, tool: Optional[str]) -> bool:
+		return tool is None or tool in self._profile_tools.get(profile, ())
+
+	def grants(self, doctype: str, operation: str, tool: Optional[str] = None) -> list:
+		"""Grants for the operation, limited to profiles that also enable `tool` (when given)."""
+		return [g for g in self._grants.get((doctype, operation), []) if self._has_tool(g.profile, tool)]
+
 	def doctypes(self) -> list:
-		return sorted(self._rules)
+		return sorted({doctype for doctype, _ in self._grants})
 
-	def operations_for(self, doctype: str) -> list:
-		ops = self._rules.get(doctype, {})
-		return [op for op in DOC_OPERATIONS if op in ops]
+	def operations_for(self, doctype: str, tool: Optional[str] = None) -> list:
+		return [op for op in DOC_OPERATIONS if self.grants(doctype, op, tool)]
 
-	def doctypes_for(self, operation: str) -> list:
-		return sorted(dt for dt, ops in self._rules.items() if operation in ops)
+	def usable_operations(self, doctype: str, operation_tools: dict) -> list:
+		"""Operations granted by a profile that also enables a tool performing them."""
+		return [
+			op
+			for op in DOC_OPERATIONS
+			if any(self.grants(doctype, op, tool) for tool in operation_tools.get(op, ()))
+		]
 
-	def grant(self, doctype: str, operation: str) -> Optional[DoctypeGrant]:
-		rules = self._rules.get(doctype, {}).get(operation)
-		if not rules:
-			return None
-		field_rule = rules[0].field_rule
-		for rule in rules[1:]:
-			field_rule = field_rule.union(rule.field_rule)
-		scopes = None
-		if all(rule.scope for rule in rules):
-			distinct = []  # equality, not hashing: condition values may be lists
-			for rule in rules:
-				if tuple(rule.scope) not in distinct:
-					distinct.append(tuple(rule.scope))
-			scopes = tuple(distinct)
-		notes = tuple(dict.fromkeys(rule.notes for rule in rules if rule.notes))
-		return DoctypeGrant(doctype, operation, field_rule, scopes, notes)
+	def doctypes_for(self, operation: str, tool: Optional[str] = None) -> list:
+		return sorted({dt for (dt, op) in self._grants if op == operation and self.grants(dt, op, tool)})
 
 	def visible_field_rule(self, doctype: str) -> Optional[FieldRule]:
-		"""Union of the field rules across every operation granted on the doctype."""
-		result = None
-		for operation in self.operations_for(doctype):
-			rule = self.grant(doctype, operation).field_rule
-			result = rule if result is None else result.union(rule)
-		return result
+		"""Union of field rules over every grant on the doctype: what describe_doctype may name."""
+		return union_rules(g for op in DOC_OPERATIONS for g in self.grants(doctype, op))
 
-	def reports(self) -> list:
-		return sorted(self._reports)
+	def reports(self, tool: Optional[str] = None) -> list:
+		return sorted(r for r, rows in self._reports.items() if any(self._has_tool(p, tool) for p, _ in rows))
 
-	def report_grant(self, report: str) -> Optional[ReportGrant]:
-		rules = self._reports.get(report)
+	def report_grant(self, report: str, tool: Optional[str] = None) -> Optional[ReportGrant]:
+		rules = [rule for profile, rule in self._reports.get(report, []) if self._has_tool(profile, tool)]
 		if not rules:
 			return None
 		options = tuple(dict(r.fixed_filters or {}) for r in rules)

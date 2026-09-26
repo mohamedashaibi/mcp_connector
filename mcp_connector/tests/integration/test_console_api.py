@@ -63,6 +63,7 @@ class TestConsoleApi(McpTestCase):
 	def test_bulk_picker_catalogs(self):
 		doctypes = {d["name"]: d for d in console.doctype_catalog()}
 		self.assertIn(F.ORDER, doctypes)
+		self.assertNotIn("Website Settings", [d for d in doctypes if doctypes[d]["writable"]])
 		self.assertTrue(doctypes[F.ORDER]["is_submittable"] and doctypes[F.ORDER]["writable"])
 		self.assertEqual(doctypes[F.ORDER]["module"], "MCP Connector")
 		self.assertFalse(doctypes["User"]["writable"])
@@ -192,6 +193,16 @@ class TestConsoleApi(McpTestCase):
 		self.assertEqual(logs["rows"][0]["tool"], "list_documents")
 		detail = console.log_detail(logs["rows"][0]["name"])
 		self.assertEqual(detail["user"], F.SALES_USER)
+		self.assertTrue(detail["arguments"])
+		frappe.set_user(MANAGER)
+		redacted = console.log_detail(logs["rows"][0]["name"])
+		self.assertIsNone(redacted["arguments"])
+		self.assertTrue(redacted["details_hidden"])
+		self.call(F.SALES_USER, "create_document", doctype=F.ORDER, data={"company": "ACME"})  # fails: missing customer
+		frappe.set_user(MANAGER)
+		failed = console.logs(json.dumps({"user": F.SALES_USER, "status": "Error", "hours": 1}))["rows"]
+		self.assertTrue(failed and all(not row["error"] for row in failed))
+		frappe.set_user("Administrator")
 		dash = console.dashboard(24)
 		self.assertGreaterEqual(dash["total"], 1)
 		self.assertEqual(len(dash["series"]["labels"]), 24)

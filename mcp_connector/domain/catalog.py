@@ -312,3 +312,9 @@ BUILTIN_TOOLS = (
 )
 
 BUILTIN_BY_NAME = {tool.name: tool for tool in BUILTIN_TOOLS}
+
+# Tools that carry out each document operation (workflow transitions can submit or cancel).
+OPERATION_TOOLS = {
+	op: tuple(t.name for t in BUILTIN_TOOLS if t.operation == op) + (("apply_workflow_action",) if op in (SUBMIT, CANCEL) else ())
+	for op in (READ, CREATE, UPDATE, DELETE, SUBMIT, CANCEL)
+}

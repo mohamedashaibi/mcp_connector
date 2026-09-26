@@ -83,6 +83,7 @@ class FrappeErpGateway:
 		info = None
 		if self._doctype_exists(doctype):
 			meta = frappe.get_meta(doctype)
+			workflow_name = get_workflow_name(doctype)
 			read_levels = set(meta.get_permlevel_access("read")) | {0}
 			write_levels = set(meta.get_permlevel_access("write")) | {0}
 			fields = self._fields(meta, read_levels, write_levels)
@@ -101,7 +102,11 @@ class FrappeErpGateway:
 				search_fields=tuple(s.strip() for s in (meta.search_fields or "").split(",") if s.strip()),
 				autoname=(meta.autoname or "").strip(),
 				description=meta.description or "",
-				has_workflow=bool(get_workflow_name(doctype)),
+				has_workflow=bool(workflow_name),
+				workflow_state_field=(
+					frappe.get_cached_value("Workflow", workflow_name, "workflow_state_field") if workflow_name else ""
+				)
+				or "",
 				fields=fields,
 				child_fields=child_fields,
 			)
@@ -275,7 +280,21 @@ class FrappeErpGateway:
 			is_standard=doc.is_standard == "Yes",
 			permitted=permitted,
 			filters=self._report_filters(doc),
+			filterable=self._builder_columns(doc),
 		)
+
+	@staticmethod
+	def _builder_columns(doc) -> Optional[frozenset]:
+		"""Columns of a Report Builder report on its own DocType: the only fields it may be filtered on."""
+		if doc.report_type != "Report Builder":
+			return None
+		try:
+			params = json.loads(doc.json or "{}")
+		except ValueError:
+			return frozenset({"name"})
+		columns = params.get("columns") or params.get("fields") or []
+		names = {c[0] for c in columns if isinstance(c, (list, tuple)) and len(c) == 2 and c[1] == doc.ref_doctype}
+		return frozenset(names | {"name"})
 
 	def _report_filters(self, doc, depth: int = 0) -> Optional[list]:
 		if doc.report_type == "Custom Report" and doc.reference_report and depth == 0:
@@ -338,6 +357,9 @@ class FrappeErpGateway:
 
 	@staticmethod
 	def _column(column) -> dict:
+		# Report Builder hands back DocField documents; they answer .get() like dicts.
+		if not isinstance(column, (dict, str)) and hasattr(column, "get"):
+			column = {k: column.get(k) for k in ("fieldname", "label", "fieldtype")}
 		if isinstance(column, dict):
 			fieldname = column.get("fieldname") or column.get("label") or ""
 			return {

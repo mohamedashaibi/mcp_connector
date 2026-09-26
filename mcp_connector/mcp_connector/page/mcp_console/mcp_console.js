@@ -62,6 +62,19 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 	const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 	const fmt_int = (n) => (n === null || n === undefined ? "—" : Number(n).toLocaleString());
 	const when = (ts) => (ts ? frappe.datetime.prettyDate(ts) || frappe.datetime.str_to_user(ts) : "");
+	// A fixed filter keeps its stored type unless edited; typed JSON lists and booleans are parsed.
+	const fixed_value = (row) => {
+		if ("original" in row && row.value === row.original_text) return row.original;
+		const text = String(row.value);
+		if (/^\s*\[.*\]\s*$/s.test(text) || text === "true" || text === "false") {
+			try {
+				return JSON.parse(text);
+			} catch (e) {
+				// Not JSON after all: keep the text.
+			}
+		}
+		return text;
+	};
 	const reduced_motion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 	const set_html = (el, markup) => {
 		el.innerHTML = markup; // markup is assembled from esc()-ed values only
@@ -598,7 +611,11 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 			const p = clone(profile);
 			p.reports = p.reports.map((r) => ({
 				...r,
-				fixed_rows: Object.entries(r.fixed_filters || {}).map(([key, value]) => ({ key, value: Array.isArray(value) ? value.join(", ") : String(value) })),
+				// Keep the stored value (list, number, boolean) unless the text is edited.
+				fixed_rows: Object.entries(r.fixed_filters || {}).map(([key, value]) => {
+					const text = typeof value === "string" ? value : JSON.stringify(value);
+					return { key, value: text, original: value, original_text: text };
+				}),
 			}));
 			return p;
 		}
@@ -624,7 +641,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				})),
 				reports: p.reports.map((r) => {
 					const fixed = {};
-					r.fixed_rows.filter((f) => f.key.trim()).forEach((f) => (fixed[f.key.trim()] = f.value));
+					r.fixed_rows.filter((f) => f.key.trim()).forEach((f) => (fixed[f.key.trim()] = fixed_value(f)));
 					return { report: r.report, fixed_filters: Object.keys(fixed).length ? fixed : null, notes: r.notes || "" };
 				}),
 			};
@@ -1872,6 +1889,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				({
 					allowed: `<span class="mcpc-state is-ok">${icon("check", 13)}<span class="sr-only">${esc(__("allowed"))}</span></span>`,
 					erp_denied: `<span class="mcpc-state is-warn">${esc(__("role"))}</span>`,
+					no_tool: `<span class="mcpc-state is-warn" title="${esc(__("Granted, but no profile granting it enables a tool for it"))}">${esc(__("tool"))}</span>`,
 					locked: `<span class="mcpc-state is-muted">${icon("lock", 13)}<span class="sr-only">${esc(__("locked"))}</span></span>`,
 					none: `<span class="mcpc-state is-none"><span aria-hidden="true">·</span><span class="sr-only">${esc(__("not granted"))}</span></span>`,
 				})[state];
@@ -1922,7 +1940,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 									${OPS.map((op) => `<td class="mcpc-cell">${cell_html(d.operations[op])}</td>`).join("")}</tr>`
 								)
 								.join("")}</tbody></table></div>
-							<p class="mcpc-legend"><span>${icon("check", 12)} ${esc(__("allowed"))}</span><span><span class="mcpc-state is-warn">${esc(__("role"))}</span>${esc(__("granted by a profile but refused by ERPNext role permissions"))}</span><span>${icon("lock", 12)} ${esc(__("read-only over MCP"))}</span></p>`
+							<p class="mcpc-legend"><span>${icon("check", 12)} ${esc(__("allowed"))}</span><span><span class="mcpc-state is-warn">${esc(__("role"))}</span>${esc(__("granted by a profile but refused by ERPNext role permissions"))}</span><span><span class="mcpc-state is-warn">${esc(__("tool"))}</span>${esc(__("granted, but that profile enables no tool for it"))}</span><span>${icon("lock", 12)} ${esc(__("read-only over MCP"))}</span></p>`
 								: `<p class="mcpc-muted">${esc(__("No DocTypes."))}</p>`
 						}
 						<h3 class="mcpc-h3">${esc(__("Tools the AI receives ({0})", [r.tools.length]))}</h3>
@@ -2048,7 +2066,8 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				</dl>
 				${r.result_summary ? `<h3 class="mcpc-h3">${esc(__("Result"))}</h3><p>${esc(r.result_summary)}</p>` : ""}
 				${r.error ? `<h3 class="mcpc-h3">${esc(__("Error"))}</h3><pre class="mcpc-pre mcpc-pre--bad">${esc(r.error)}</pre>` : ""}
-				${args ? `<h3 class="mcpc-h3">${esc(__("Arguments"))}</h3><pre class="mcpc-pre">${esc(args)}</pre>` : ""}`
+				${args ? `<h3 class="mcpc-h3">${esc(__("Arguments"))}</h3><pre class="mcpc-pre">${esc(args)}</pre>` : ""}
+				${r.details_hidden ? `<p class="mcpc-help">${esc(__("Arguments and error details are visible to System Managers only, as they can contain record values."))}</p>` : ""}`
 			);
 			d.show();
 		}

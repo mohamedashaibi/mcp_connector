@@ -22,6 +22,7 @@ ORDER = "MCP Test Order"
 ORDER_ITEM = "MCP Test Order Item"
 REQUEST = "MCP Test Request"
 REPORT = "MCP Test Orders By Company"
+BUILDER_REPORT = "MCP Test Order Builder"
 WORKFLOW = "MCP Test Request Approval"
 SERVER_SCRIPT = "MCP Test Echo"
 SERVER_SCRIPT_METHOD = "mcp_test_echo"
@@ -172,6 +173,29 @@ def ensure_report():
 	)
 
 
+def ensure_builder_report():
+	import json
+
+	_ensure(
+		"Report",
+		BUILDER_REPORT,
+		{
+			"report_name": BUILDER_REPORT,
+			"ref_doctype": ORDER,
+			"report_type": "Report Builder",
+			"is_standard": "No",
+			"module": "MCP Connector",
+			"json": json.dumps(
+				{
+					"columns": [["name", ORDER], ["customer", ORDER], ["company", ORDER]],
+					"filters": [],
+					"order_by": f"`tab{ORDER}`.`name` asc",
+				}
+			),
+		},
+	)
+
+
 def ensure_server_script():
 	_ensure(
 		"Server Script",
@@ -192,6 +216,7 @@ def ensure_all():
 	ensure_doctypes()
 	ensure_workflow()
 	ensure_report()
+	ensure_builder_report()
 	if frappe.conf.get("server_script_enabled"):
 		ensure_server_script()
 	frappe.db.commit()

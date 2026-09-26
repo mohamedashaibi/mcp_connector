@@ -5,7 +5,7 @@ from typing import Optional, Protocol
 
 from mcp_connector.domain.action_types import ACTION_TYPES, DOC_OPERATIONS, FRAPPE_PTYPE, READ
 from mcp_connector.domain.audit import DENIED, ERROR, SUCCESS
-from mcp_connector.domain.catalog import BUILTIN_TOOLS
+from mcp_connector.domain.catalog import BUILTIN_TOOLS, OPERATION_TOOLS
 from mcp_connector.domain.errors import InvalidArguments, NotFound
 from mcp_connector.domain.policy import ALL_FIELDS, EffectivePolicy, match_reason, resolve_policy
 from mcp_connector.domain.protected import NEVER_EXPOSED, READ_ONLY, is_exposable, is_writable
@@ -324,10 +324,13 @@ class InspectUser:
 		doctypes = []
 		for doctype in policy.doctypes():
 			granted = policy.operations_for(doctype)
+			usable = policy.usable_operations(doctype, OPERATION_TOOLS)
 			cells = {}
 			for op in DOC_OPERATIONS:
 				if op not in granted:
 					cells[op] = "none"
+				elif op not in usable:
+					cells[op] = "no_tool"
 				elif not is_exposable(doctype) or (op != READ and not is_writable(doctype)):
 					cells[op] = "locked"
 				elif not allowed(doctype, FRAPPE_PTYPE[op]):
@@ -338,7 +341,8 @@ class InspectUser:
 				{
 					"doctype": doctype,
 					"operations": cells,
-					"scoped": any(policy.grant(doctype, op).scopes for op in granted),
+					# Scoped when some operation is only granted with a record scope.
+					"scoped": any(all(g.scope for g in policy.grants(doctype, op)) for op in granted),
 					"fields_limited": policy.visible_field_rule(doctype).mode != ALL_FIELDS,
 				}
 			)
@@ -391,12 +395,20 @@ class SaveSettings:
 		return self.settings.get()
 
 
+def _redact_entry(entry: dict) -> dict:
+	"""Arguments and error text can quote record values the viewer may have no ERPNext access to."""
+	hidden = {k: None for k in ("arguments", "error") if entry.get(k)}
+	return {**entry, **hidden, "details_hidden": bool(hidden)} if hidden else entry
+
+
 class SearchLogs:
 	def __init__(self, audit: AuditQuery):
 		self.audit = audit
 
-	def execute(self, query: LogQuery) -> dict:
+	def execute(self, query: LogQuery, include_details: bool = True) -> dict:
 		rows = self.audit.search(query)
+		if not include_details:
+			rows = [_redact_entry(r) for r in rows]
 		return {"rows": rows[: query.limit], "has_more": len(rows) > query.limit, "start": query.start}
 
 
@@ -404,11 +416,11 @@ class GetLog:
 	def __init__(self, audit: AuditQuery):
 		self.audit = audit
 
-	def execute(self, name: str) -> dict:
+	def execute(self, name: str, include_details: bool) -> dict:
 		entry = self.audit.get(name)
 		if entry is None:
 			raise NotFound("Audit log entry not found")
-		return entry
+		return entry if include_details else _redact_entry(entry)
 
 
 class GenerateKeys:

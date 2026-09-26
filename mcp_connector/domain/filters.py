@@ -160,27 +160,32 @@ def parse_order_by(raw: Any, is_allowed: Callable[[str], bool], default: str = "
 	return tuple(keys)
 
 
+def with_tie_breaker(keys: tuple) -> tuple:
+	"""Add `name` as the last sort key so every ordering is total and pages are stable."""
+	return keys if any(f == "name" for f, _ in keys) else tuple(keys) + (("name", "asc"),)
+
+
 def order_by_sql(keys: tuple) -> str:
 	# Safe: every part was matched against IDENTIFIER and asc/desc above.
-	return ", ".join(f"`{fieldname}` {direction}" for fieldname, direction in keys)
+	return ", ".join(f"`{fieldname}` {direction}" for fieldname, direction in with_tie_breaker(keys))
 
 
 def sort_rows(rows: list, keys: tuple) -> list:
-	"""Sort merged result rows in Python the way the database would (NULLs first on asc)."""
+	"""Sort merged rows like MariaDB would: NULLs first on asc, text case-insensitive, name last."""
 
 	def sort_key(fieldname):
 		def key(row):
 			value = row.get(fieldname)
-			if value is None:
+			if value is None or value == "":
 				return (0, "")
 			if isinstance(value, (int, float)) and not isinstance(value, bool):
 				return (1, value)
-			return (2, str(value))
+			return (2, str(value).casefold())
 
 		return key
 
 	result = list(rows)
-	for fieldname, direction in reversed(keys):
+	for fieldname, direction in reversed(with_tie_breaker(keys)):
 		result.sort(key=sort_key(fieldname), reverse=direction == "desc")
 	return result
 

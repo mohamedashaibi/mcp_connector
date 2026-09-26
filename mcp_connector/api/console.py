@@ -36,6 +36,10 @@ def _require_manager():
 	_require_roles(MANAGER_ROLES)
 
 
+def _is_system_manager() -> bool:
+	return "System Manager" in frappe.get_roles()
+
+
 def _run(fn, *args):
 	try:
 		return fn(*args)
@@ -201,13 +205,13 @@ def save_settings(settings):
 def logs(query=None):
 	_require_manager()
 	parsed = _run(parse_log_query, _payload(query) or {})
-	return uc.SearchLogs(FrappeAuditQuery()).execute(parsed)
+	return uc.SearchLogs(FrappeAuditQuery()).execute(parsed, _is_system_manager())
 
 
 @frappe.whitelist()
 def log_detail(name):
 	_require_manager()
-	return _run(uc.GetLog(FrappeAuditQuery()).execute, name)
+	return _run(uc.GetLog(FrappeAuditQuery()).execute, name, _is_system_manager())
 
 
 @frappe.whitelist(methods=["POST"])

@@ -44,6 +44,7 @@ class DoctypeInfo:
 	autoname: str = ""
 	description: str = ""
 	has_workflow: bool = False
+	workflow_state_field: str = ""
 	fields: tuple = ()  # FieldInfo, layout fields excluded
 	child_fields: dict = field(default_factory=dict)  # child doctype -> tuple[FieldInfo]
 
@@ -63,6 +64,7 @@ class ReportInfo:
 	is_standard: bool = False
 	permitted: bool = True
 	filters: Optional[list] = None  # None = unknown / defined dynamically
+	filterable: Optional[frozenset] = None  # Report Builder: only these columns may be filtered
 	description: str = ""
 
 

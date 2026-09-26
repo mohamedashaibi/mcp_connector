@@ -3,12 +3,17 @@
 Every handler re-checks the policy for the exact doctype/report it touches;
 argument enums in the tool schema are a convenience for the model, never the
 security boundary.
+
+Several matching profiles are alternatives (see domain.policy): each check
+looks for one profile whose grant covers the whole request -- this tool, the
+operation, the fields involved and the record's scope.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from mcp_connector.domain.action_types import CANCEL, CREATE, DELETE, FRAPPE_PTYPE, READ, SUBMIT, UPDATE
+from mcp_connector.domain.catalog import OPERATION_TOOLS
 from mcp_connector.domain.errors import InvalidArguments, NotFound, PolicyDenied
 from mcp_connector.domain.filters import (
 	check_identifier,
@@ -20,7 +25,7 @@ from mcp_connector.domain.filters import (
 	require_fields,
 	sort_rows,
 )
-from mcp_connector.domain.policy import ActionSpec, DoctypeGrant, EffectivePolicy
+from mcp_connector.domain.policy import ActionSpec, EffectivePolicy, union_rules
 from mcp_connector.domain.protected import is_blocked_method, is_exposable, is_writable
 
 from .access import (
@@ -35,6 +40,8 @@ from .dto import DoctypeInfo, ServerSettings, ToolOutcome
 from .ports import ErpGateway
 
 MULTI_SCOPE_COUNT_CAP = 50_000
+# Several scoped grants are merged in memory; each is read from row 0, so bound the window.
+MULTI_SCOPE_WINDOW = 5_000
 
 
 @dataclass
@@ -42,6 +49,7 @@ class ToolContext:
 	policy: EffectivePolicy
 	settings: ServerSettings
 	gateway: ErpGateway
+	tool: Optional[str] = None  # the tool being called; grants must come from profiles enabling it
 
 
 def _not_found(doctype: str, name: str) -> NotFound:
@@ -51,16 +59,16 @@ def _not_found(doctype: str, name: str) -> NotFound:
 class DocumentTool:
 	operation = READ
 
-	def grant(self, ctx: ToolContext, doctype: str, operation: str = None) -> DoctypeGrant:
+	def grants(self, ctx: ToolContext, doctype: str, operation: str = None) -> list:
 		operation = operation or self.operation
 		if not is_exposable(doctype):
 			raise PolicyDenied(f"{doctype} is never available over MCP")
 		if operation != READ and not is_writable(doctype):
 			raise PolicyDenied(f"{doctype} is read-only over MCP")
-		grant = ctx.policy.grant(doctype, operation)
-		if grant is None:
+		grants = ctx.policy.grants(doctype, operation, ctx.tool)
+		if not grants:
 			raise PolicyDenied(f"Your MCP access profile does not allow {operation} on {doctype}")
-		return grant
+		return grants
 
 	def info(self, ctx: ToolContext, doctype: str) -> DoctypeInfo:
 		info = ctx.gateway.doctype_info(doctype)
@@ -74,33 +82,49 @@ class DocumentTool:
 			raise PolicyDenied(f"Your ERPNext roles do not allow {operation} on {doctype}")
 
 	def prepare(self, ctx: ToolContext, doctype: str):
-		grant = self.grant(ctx, doctype)
+		grants = self.grants(ctx, doctype)
 		info = self.info(ctx, doctype)
 		self.require_erp_permission(ctx, doctype)
-		return grant, info
+		return grants, info
 
-	def ensure_in_scope(self, ctx: ToolContext, grant: DoctypeGrant, info: DoctypeInfo, name: str) -> None:
+	@staticmethod
+	def matching(ctx: ToolContext, info: DoctypeInfo, name: str, grants: list) -> list:
+		"""The grants whose scope contains the record."""
 		if info.issingle:
-			if name != info.name:
-				raise _not_found(info.name, name)
-			return
-		if not ctx.gateway.document_exists(info.name, name):
-			raise _not_found(info.name, name)
-		if grant.scopes is not None and not any(
-			ctx.gateway.document_matches(info.name, name, scope) for scope in grant.scopes
-		):
-			raise _not_found(info.name, name)
+			return list(grants) if name == info.name else []
+		return [g for g in grants if not g.scope or ctx.gateway.document_matches(info.name, name, g.scope)]
 
-	def in_scope_after_write(self, ctx: ToolContext, grant: DoctypeGrant, info: DoctypeInfo, name: str) -> bool:
-		if grant.scopes is None or info.issingle:
-			return True
-		return any(ctx.gateway.document_matches(info.name, name, scope) for scope in grant.scopes)
+	def in_scope(self, ctx: ToolContext, info: DoctypeInfo, name: str, grants: list) -> list:
+		"""Grants covering an existing record; a missing and an out-of-scope record look the same."""
+		if not info.issingle and not ctx.gateway.document_exists(info.name, name):
+			raise _not_found(info.name, name)
+		covering = self.matching(ctx, info, name, grants)
+		if not covering:
+			raise _not_found(info.name, name)
+		return covering
+
+	def accepting(self, info: DoctypeInfo, grants: list, data: Any, creating: bool):
+		"""Grants whose field rule accepts every field being written, with the cleaned data."""
+		accepted, cleaned, first_error = [], None, None
+		for grant in grants:
+			try:
+				result = validate_write_data(data, info, grant.field_rule, creating=creating)
+			except (InvalidArguments, PolicyDenied) as e:
+				first_error = first_error or e
+				continue
+			accepted.append(grant)
+			cleaned = result
+		if not accepted:
+			raise first_error or PolicyDenied(f"Your MCP access profile does not allow writing {info.name}")
+		return accepted, cleaned
 
 	def visible(self, ctx: ToolContext, info: DoctypeInfo, doc: dict) -> dict:
-		read = ctx.policy.grant(info.name, READ)
-		if read is None:
+		"""Project a written document through the Read grants whose scope contains it."""
+		reads = ctx.policy.grants(info.name, READ, "get_document")
+		covering = self.matching(ctx, info, doc.get("name"), reads) if reads else []
+		if not covering:
 			return {k: doc.get(k) for k in ("doctype", "name", "docstatus") if k in doc}
-		return project_document(doc, info, read.field_rule)
+		return project_document(doc, info, union_rules(covering))
 
 
 class ListDoctypesTool:
@@ -114,7 +138,7 @@ class ListDoctypesTool:
 				continue
 			operations = [
 				op
-				for op in ctx.policy.operations_for(doctype)
+				for op in ctx.policy.usable_operations(doctype, OPERATION_TOOLS)
 				if (op == READ or is_writable(doctype))
 				and (op not in (SUBMIT, CANCEL) or info.is_submittable)
 				and ctx.gateway.has_permission(doctype, FRAPPE_PTYPE[op])
@@ -126,7 +150,9 @@ class ListDoctypesTool:
 				row["submittable"] = True
 			if info.issingle:
 				row["single"] = True
-			notes = [n for op in operations for n in ctx.policy.grant(doctype, op).notes]
+			if info.has_workflow:
+				row["workflow"] = True
+			notes = [g.notes for op in operations for g in ctx.policy.grants(doctype, op) if g.notes]
 			if notes:
 				row["notes"] = " ".join(dict.fromkeys(notes))
 			rows.append(row)
@@ -175,7 +201,7 @@ class DescribeDoctypeTool(DocumentTool):
 					],
 				}
 
-		operations = ctx.policy.operations_for(doctype)
+		operations = ctx.policy.usable_operations(doctype, OPERATION_TOOLS)
 		payload = {
 			"doctype": doctype,
 			"module": info.module,
@@ -191,13 +217,13 @@ class DescribeDoctypeTool(DocumentTool):
 		if child_tables:
 			payload["child_tables"] = child_tables
 		if info.has_workflow:
-			payload["has_workflow"] = True
-		notes = [n for op in operations for n in ctx.policy.grant(doctype, op).notes]
+			payload["workflow"] = "Submitting and cancelling go through apply_workflow_action; the workflow state is set by it."
+		all_grants = [g for op in operations for g in ctx.policy.grants(doctype, op)]
+		notes = [g.notes for g in all_grants if g.notes]
 		if notes:
 			payload["notes"] = " ".join(dict.fromkeys(notes))
-		scopes = [s for s in (ctx.policy.grant(doctype, op).scopes for op in operations) if s]
-		if scopes:
-			payload["access_scope"] = "Only records matching the administrator's scope filters are visible."
+		if any(g.scope for g in all_grants):
+			payload["access_scope"] = "Only records matching the administrator's scope filters are reachable."
 		return ToolOutcome(payload, summary=f"{len(fields)} field(s)", document_type=doctype)
 
 
@@ -206,49 +232,66 @@ class ListDocumentsTool(DocumentTool):
 
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		doctype = args["doctype"]
-		grant, info = self.prepare(ctx, doctype)
+		grants, info = self.prepare(ctx, doctype)
 		if info.issingle:
 			raise InvalidArguments(f"{doctype} is a single (settings) DocType; use get_document with name '{doctype}'")
 
-		listable = listable_fields(info, grant.field_rule)
-		allowed = listable.__contains__
-		fields = parse_fields(args.get("fields"), allowed) or default_list_fields(info, listable)
+		listables = [listable_fields(info, g.field_rule) for g in grants]
+		any_listable = set().union(*listables).__contains__
+		fields = parse_fields(args.get("fields"), any_listable) or default_list_fields(info, set.intersection(*listables))
 		conditions = normalize_filters(args.get("filters"))
-		require_fields(conditions, allowed)
-		or_conditions = search_conditions(info, listable, args.get("search"))
-		order = parse_order_by(args.get("order_by"), allowed)
+		require_fields(conditions, any_listable)
+		order = parse_order_by(args.get("order_by"), any_listable)
 		limit = clamp_int(args.get("limit"), "limit", ctx.settings.default_page_size, 1, ctx.settings.max_page_size)
 		start = clamp_int(args.get("start"), "start", 0, 0, 10_000_000)
 
+		# Only grants under which every field involved is visible may serve the rows.
+		needed = {"name", *fields, *(c[0] for c in conditions), *(k for k, _ in order)}
+		usable = [(g, listable) for g, listable in zip(grants, listables) if needed <= listable]
+		if not usable:
+			raise PolicyDenied(
+				f"No single access rule of yours shows all of: {', '.join(sorted(needed - {'name'}))}. Ask for fewer fields."
+			)
+		unscoped = [pair for pair in usable if not pair[0].scope]
+		if unscoped:
+			usable = unscoped[:1]
+
 		query_fields = list(dict.fromkeys(["name", *fields, *(key for key, _ in order)]))
-		rows = self._query(ctx, grant, query_fields, conditions, or_conditions, order, start, limit + 1)
+		search = args.get("search")
+		if len(usable) == 1:
+			grant, listable = usable[0]
+			rows = ctx.gateway.list_documents(
+				doctype,
+				query_fields,
+				list(conditions) + list(grant.scope),
+				search_conditions(info, listable, search),
+				order_by_sql(order),
+				start,
+				limit + 1,
+			)
+		else:
+			if start + limit > MULTI_SCOPE_WINDOW:
+				raise InvalidArguments(
+					f"Paging past row {MULTI_SCOPE_WINDOW} is not available across several access scopes; add filters instead"
+				)
+			merged = {}
+			for grant, listable in usable:
+				for row in ctx.gateway.list_documents(
+					doctype,
+					query_fields,
+					list(conditions) + list(grant.scope),
+					search_conditions(info, listable, search),
+					order_by_sql(order),
+					0,
+					start + limit + 1,
+				):
+					merged.setdefault(row["name"], row)
+			rows = sort_rows(list(merged.values()), order)[start : start + limit + 1]
+
 		has_more = len(rows) > limit
 		data = [{k: row.get(k) for k in fields} for row in rows[:limit]]
-		payload = {
-			"doctype": doctype,
-			"start": start,
-			"limit": limit,
-			"returned": len(data),
-			"has_more": has_more,
-			"data": data,
-		}
+		payload = {"doctype": doctype, "start": start, "limit": limit, "returned": len(data), "has_more": has_more, "data": data}
 		return ToolOutcome(payload, summary=f"{len(data)} row(s)", document_type=doctype)
-
-	def _query(self, ctx, grant, fields, conditions, or_conditions, order, start, limit):
-		order_sql = order_by_sql(order)
-		scopes = grant.scopes
-		if scopes is None or len(scopes) == 1:
-			filters = list(conditions) + (list(scopes[0]) if scopes else [])
-			return ctx.gateway.list_documents(grant.doctype, fields, filters, or_conditions, order_sql, start, limit)
-		# ponytail: union of scopes merged in Python; fine for page-sized reads, a
-		# deep offset re-reads start+limit rows per scope.
-		merged = {}
-		for scope in scopes:
-			for row in ctx.gateway.list_documents(
-				grant.doctype, fields, list(conditions) + list(scope), or_conditions, order_sql, 0, start + limit
-			):
-				merged.setdefault(row["name"], row)
-		return sort_rows(list(merged.values()), order)[start : start + limit]
 
 
 class CountDocumentsTool(DocumentTool):
@@ -256,23 +299,26 @@ class CountDocumentsTool(DocumentTool):
 
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		doctype = args["doctype"]
-		grant, info = self.prepare(ctx, doctype)
+		grants, info = self.prepare(ctx, doctype)
 		if info.issingle:
 			raise InvalidArguments(f"{doctype} is a single (settings) DocType and has no rows to count")
-		listable = listable_fields(info, grant.field_rule)
+		listables = [listable_fields(info, g.field_rule) for g in grants]
 		conditions = normalize_filters(args.get("filters"))
-		require_fields(conditions, listable.__contains__)
+		require_fields(conditions, set().union(*listables).__contains__)
+		needed = {c[0] for c in conditions}
+		usable = [g for g, listable in zip(grants, listables) if needed <= listable]
+		if not usable:
+			raise PolicyDenied(f"No single access rule of yours lets you filter on: {', '.join(sorted(needed))}")
 
 		payload = {"doctype": doctype}
-		scopes = grant.scopes
-		if scopes is None or len(scopes) == 1:
-			filters = list(conditions) + (list(scopes[0]) if scopes else [])
-			payload["count"] = ctx.gateway.count_documents(doctype, filters, [])
+		unscoped = [g for g in usable if not g.scope]
+		if unscoped or len(usable) == 1:
+			scope = [] if unscoped else list(usable[0].scope)
+			payload["count"] = ctx.gateway.count_documents(doctype, list(conditions) + scope, [])
 		else:
-			names = set()
-			capped = False
-			for scope in scopes:
-				found = ctx.gateway.list_names(doctype, list(conditions) + list(scope), MULTI_SCOPE_COUNT_CAP)
+			names, capped = set(), False
+			for grant in usable:
+				found = ctx.gateway.list_names(doctype, list(conditions) + list(grant.scope), MULTI_SCOPE_COUNT_CAP)
 				capped = capped or len(found) >= MULTI_SCOPE_COUNT_CAP
 				names.update(found)
 			payload["count"] = len(names)
@@ -286,12 +332,17 @@ class GetDocumentTool(DocumentTool):
 
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		doctype, name = args["doctype"], args["name"]
-		grant, info = self.prepare(ctx, doctype)
-		self.ensure_in_scope(ctx, grant, info, name)
-		doc = project_document(ctx.gateway.get_document(doctype, name), info, grant.field_rule)
+		grants, info = self.prepare(ctx, doctype)
+		covering = self.in_scope(ctx, info, name, grants)
+		doc = project_document(ctx.gateway.get_document(doctype, name), info, union_rules(covering))
 		if info.has_workflow:
 			doc["_workflow"] = ctx.gateway.workflow_actions(doctype, name)
 		return ToolOutcome(doc, summary=f"{doctype} {name}", document_type=doctype, document_name=name)
+
+
+def _reject_workflow_state(info: DoctypeInfo, data: Any) -> None:
+	if info.has_workflow and isinstance(data, dict) and info.workflow_state_field in data:
+		raise PolicyDenied(f"'{info.workflow_state_field}' is controlled by the workflow; use apply_workflow_action")
 
 
 class CreateDocumentTool(DocumentTool):
@@ -299,18 +350,16 @@ class CreateDocumentTool(DocumentTool):
 
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		doctype = args["doctype"]
-		grant, info = self.prepare(ctx, doctype)
+		grants, info = self.prepare(ctx, doctype)
 		if info.issingle:
 			raise InvalidArguments(f"{doctype} is a single (settings) DocType; use update_document instead")
-		data = validate_write_data(args["data"], info, grant.field_rule, creating=True)
+		_reject_workflow_state(info, args["data"])
+		accepted, data = self.accepting(info, grants, args["data"], creating=True)
 		doc = ctx.gateway.create_document(doctype, data)
-		if not self.in_scope_after_write(ctx, grant, info, doc["name"]):
+		if not self.matching(ctx, info, doc["name"], accepted):
 			raise PolicyDenied(f"The new {doctype} would fall outside your access scope; nothing was saved")
 		return ToolOutcome(
-			self.visible(ctx, info, doc),
-			summary=f"Created {doctype} {doc['name']}",
-			document_type=doctype,
-			document_name=doc["name"],
+			self.visible(ctx, info, doc), summary=f"Created {doctype} {doc['name']}", document_type=doctype, document_name=doc["name"]
 		)
 
 
@@ -319,15 +368,14 @@ class UpdateDocumentTool(DocumentTool):
 
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		doctype, name = args["doctype"], args["name"]
-		grant, info = self.prepare(ctx, doctype)
-		self.ensure_in_scope(ctx, grant, info, name)
-		data = validate_write_data(args["data"], info, grant.field_rule, creating=False)
+		grants, info = self.prepare(ctx, doctype)
+		_reject_workflow_state(info, args["data"])
+		covering = self.in_scope(ctx, info, name, grants)
+		accepted, data = self.accepting(info, covering, args["data"], creating=False)
 		doc = ctx.gateway.update_document(doctype, name, data)
-		if not self.in_scope_after_write(ctx, grant, info, name):
+		if not self.matching(ctx, info, name, accepted):
 			raise PolicyDenied(f"This change would move {doctype} {name} outside your access scope; nothing was saved")
-		return ToolOutcome(
-			self.visible(ctx, info, doc), summary=f"Updated {doctype} {name}", document_type=doctype, document_name=name
-		)
+		return ToolOutcome(self.visible(ctx, info, doc), summary=f"Updated {doctype} {name}", document_type=doctype, document_name=name)
 
 
 class DeleteDocumentTool(DocumentTool):
@@ -335,16 +383,13 @@ class DeleteDocumentTool(DocumentTool):
 
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		doctype, name = args["doctype"], args["name"]
-		grant, info = self.prepare(ctx, doctype)
+		grants, info = self.prepare(ctx, doctype)
 		if info.issingle:
 			raise InvalidArguments(f"{doctype} is a single (settings) DocType and cannot be deleted")
-		self.ensure_in_scope(ctx, grant, info, name)
+		self.in_scope(ctx, info, name, grants)
 		ctx.gateway.delete_document(doctype, name)
 		return ToolOutcome(
-			{"deleted": True, "doctype": doctype, "name": name},
-			summary=f"Deleted {doctype} {name}",
-			document_type=doctype,
-			document_name=name,
+			{"deleted": True, "doctype": doctype, "name": name}, summary=f"Deleted {doctype} {name}", document_type=doctype, document_name=name
 		)
 
 
@@ -353,17 +398,14 @@ class _DocstatusTool(DocumentTool):
 
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		doctype, name = args["doctype"], args["name"]
-		grant, info = self.prepare(ctx, doctype)
+		grants, info = self.prepare(ctx, doctype)
 		if not info.is_submittable:
 			raise InvalidArguments(f"{doctype} is not submittable")
-		self.ensure_in_scope(ctx, grant, info, name)
+		if info.has_workflow:
+			raise InvalidArguments(f"{doctype} follows an approval workflow; use apply_workflow_action instead")
+		self.in_scope(ctx, info, name, grants)
 		doc = self.change(ctx, doctype, name)
-		return ToolOutcome(
-			self.visible(ctx, info, doc),
-			summary=f"{self.verb} {doctype} {name}",
-			document_type=doctype,
-			document_name=name,
-		)
+		return ToolOutcome(self.visible(ctx, info, doc), summary=f"{self.verb} {doctype} {name}", document_type=doctype, document_name=name)
 
 
 class SubmitDocumentTool(_DocstatusTool):
@@ -387,10 +429,10 @@ class ApplyWorkflowActionTool(DocumentTool):
 
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		doctype, name, action = args["doctype"], args["name"], args["action"]
-		grant, info = self.prepare(ctx, doctype)
+		grants, info = self.prepare(ctx, doctype)
 		if not info.has_workflow:
 			raise InvalidArguments(f"{doctype} has no active workflow")
-		self.ensure_in_scope(ctx, grant, info, name)
+		covering_profiles = {g.profile for g in self.in_scope(ctx, info, name, grants)}
 
 		workflow = ctx.gateway.workflow_actions(doctype, name)
 		transition = next((t for t in workflow.get("actions", []) if t.get("action") == action), None)
@@ -398,10 +440,14 @@ class ApplyWorkflowActionTool(DocumentTool):
 			available = ", ".join(t["action"] for t in workflow.get("actions", [])) or "none"
 			raise InvalidArguments(f"Workflow action '{action}' is not available to you now. Available: {available}")
 		current, target = workflow.get("docstatus", 0), transition.get("next_docstatus", 0)
-		if target == 1 and current == 0:
-			self.grant(ctx, doctype, SUBMIT)
-		if target == 2 and current == 1:
-			self.grant(ctx, doctype, CANCEL)
+		for needed, op in ((target == 1 and current == 0, SUBMIT), (target == 2 and current == 1, CANCEL)):
+			# Submitting or cancelling through a workflow needs that grant too, in scope, from the
+			# same profile that allows the update -- never pieced together from two profiles.
+			if not needed:
+				continue
+			same_profile = [g for g in self.grants(ctx, doctype, op) if g.profile in covering_profiles]
+			if not self.matching(ctx, info, name, same_profile):
+				raise PolicyDenied(f"'{action}' would {op.lower()} {doctype} {name}, which your access profile does not allow")
 
 		doc = ctx.gateway.apply_workflow_action(doctype, name, action)
 		return ToolOutcome(
@@ -422,15 +468,15 @@ def _report_payload_base(info) -> dict:
 class ListReportsTool:
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		rows = []
-		for report in ctx.policy.reports():
+		for report in ctx.policy.reports(ctx.tool):
 			info = ctx.gateway.report_info(report)
 			if info is None or not info.permitted:
 				continue
 			row = _report_payload_base(info)
-			grant = ctx.policy.report_grant(report)
+			grant = ctx.policy.report_grant(report, ctx.tool)
 			if grant.notes:
 				row["notes"] = " ".join(grant.notes)
-			if any(grant.fixed_filter_options) and all(grant.fixed_filter_options):
+			if all(grant.fixed_filter_options):
 				row["has_fixed_filters"] = True
 			rows.append(row)
 		return ToolOutcome({"count": len(rows), "reports": rows}, summary=f"{len(rows)} report(s)")
@@ -438,7 +484,7 @@ class ListReportsTool:
 
 class _ReportTool:
 	def prepare(self, ctx: ToolContext, report: str):
-		grant = ctx.policy.report_grant(report)
+		grant = ctx.policy.report_grant(report, ctx.tool)
 		if grant is None:
 			raise PolicyDenied(f"Your MCP access profile does not allow the report '{report}'")
 		info = ctx.gateway.report_info(report)
@@ -458,9 +504,10 @@ class DescribeReportTool(_ReportTool):
 			payload["description"] = info.description[:500]
 		if info.filters is not None:
 			payload["filters"] = info.filters
-		elif info.report_type == "Report Builder" and info.ref_doctype:
+		elif info.filterable is not None:
 			payload["filters_hint"] = (
-				f"Pass filters on {info.ref_doctype} fields: {{fieldname: value}} or {{fieldname: [operator, value]}}."
+				"Pass {fieldname: value} or {fieldname: [operator, value]} for these columns: "
+				+ ", ".join(sorted(info.filterable))
 			)
 		else:
 			payload["filters_hint"] = "This report defines its filters dynamically; common ones are company, from_date and to_date."
@@ -473,7 +520,7 @@ class DescribeReportTool(_ReportTool):
 		return ToolOutcome(payload, summary=report, report=report)
 
 
-def _validate_report_filters(filters: Any) -> dict:
+def _validate_report_filters(filters: Any, filterable: Optional[set]) -> dict:
 	if filters in (None, ""):
 		return {}
 	if not isinstance(filters, dict):
@@ -483,6 +530,10 @@ def _validate_report_filters(filters: Any) -> dict:
 	scalar = (str, int, float, bool, type(None))
 	for key, value in filters.items():
 		check_identifier(key, "filter")
+		if filterable is not None and key not in filterable:
+			# Report Builder filters hit the base DocType directly: only the report's own columns
+			# may be filtered, so hidden fields cannot be probed through them.
+			raise InvalidArguments(f"This report can only be filtered on its columns: {', '.join(sorted(filterable))}")
 		if isinstance(value, list):
 			for item in value:
 				if isinstance(item, list):
@@ -499,7 +550,7 @@ class RunReportTool(_ReportTool):
 	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
 		report = args["report_name"]
 		grant, info = self.prepare(ctx, report)
-		requested = _validate_report_filters(args.get("filters"))
+		requested = _validate_report_filters(args.get("filters"), info.filterable)
 		filters = grant.resolve_filters(requested)
 		limit = clamp_int(args.get("limit"), "limit", ctx.settings.max_report_rows, 1, ctx.settings.max_report_rows)
 

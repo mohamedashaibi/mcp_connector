@@ -5,7 +5,7 @@ Connect AI assistants (Claude, Cursor, VS Code Copilot, any MCP client) to ERPNe
 role, action type, action, DocType, field, record and report.
 
 - **Deny by default.** Nothing is reachable until an *access profile* grants it.
-- **Profiles per role or user.** Everyone holding a role (or a named integration user) gets that profile's grants; several profiles combine like Frappe role permissions.
+- **Profiles per role or user.** Everyone holding a role (or a named integration user) gets that profile's grants. When several profiles match, each is a separate alternative — never blended.
 - **Five levels of control:** action types (Read, Create, Update, Delete, Submit, Cancel, Reports, Custom) → actions (individual MCP tools) → DocTypes (per-operation matrix) → fields (all / only / all-except) and record scope (filters) → reports (with enforced fixed filters).
 - **ERPNext permissions always apply on top.** Every call runs as the real ERPNext user; a profile can only narrow what that user could already do.
 - **MCP Console** — a desk page to build profiles, inspect what any user's AI can do, watch activity, and generate ready-to-paste client configuration.
@@ -161,10 +161,12 @@ new **MCP Manager** role can manage profiles too.
 2. **Create an access profile** (*Console → Profiles → New profile*):
    - **Who** — add the integration user, or a role.
    - **Capabilities** — switch on action types (start with *Read* and *Reports*) and pick actions.
-   - **DocTypes** — add each DocType and tick operations. Use **Fields** to hide columns
+   - **DocTypes** — add DocTypes one by one, or use **Add several** to pick many at once (search,
+     or select a whole module such as Selling or Stock) and grant the same operations to all of them.
+     Tick or untick operations per row, or click a column header to toggle it for every row. Use **Fields** to hide columns
      (salaries, bank details…) and **Scope & notes** to restrict records (e.g. `company = ACME`) and
      to leave guidance for the AI.
-   - **Reports** — add reports; use **fixed filters** to pin values the AI cannot override.
+   - **Reports** — add reports (again with **Add several** for bulk); use **fixed filters** to pin values the AI cannot override.
    - **AI view** shows exactly which tools the profile produces.
 3. **Check it** in *Console → Inspector*: pick the integration user and confirm the profiles,
    tools and DocType matrix are what you intended.
@@ -264,14 +266,21 @@ A tool call succeeds only if **every** layer allows it:
 | 7 | Requested **fields** are visible, and the **record** matches the scope | Profile → Fields, Scope |
 | 8 | **ERPNext** role, user and field-level permissions allow it | ERPNext |
 
-Several matching profiles are combined the way Frappe combines roles: an operation is allowed if
-any profile allows it; field visibility and record scopes are unioned across the profiles that
-grant that operation. Fixed report filters from one granting profile are always enforced.
+When several profiles match a user, each one is an **alternative, never a blend**: a call succeeds
+only if a single profile allows the tool, its action type, the operation, every field involved and
+the record's scope — together. Combining a profile that shows *all fields for territory X* with one
+that shows *only customer names everywhere* therefore gives all fields for territory X and only names
+elsewhere, never all fields everywhere. A report's fixed filters come from the profile that grants it.
+
+DocTypes with an active approval workflow are submitted and cancelled only through
+`apply_workflow_action` (which respects the workflow's roles); their workflow state field cannot be
+written directly.
 
 Some DocTypes are protected regardless of profiles: the connector's own configuration and audit
 log, credential stores (OAuth tokens, social login keys…) and System Console are never exposed;
-DocTypes that hold code, templates, schema or permissions (DocType, Custom Field, Server Script,
-Print Format, User, Role, User Permission, Report, Workflow…) can be granted **Read** only.
+DocTypes that hold code, templates, schema, sharing or permissions (DocType, Custom Field, Server
+Script, Print Format, Letter Head, Website and Portal Settings, Address Template, Translation, User,
+Role, User Permission, DocShare, Assignment Rule, Report, Workflow…) can be granted **Read** only.
 
 ---
 
@@ -318,12 +327,20 @@ inside your method — validate what it does. Generic CRUD and auth methods (`fr
 
 - Every request is authenticated by Frappe itself (API key/secret, OAuth bearer token, or a desk
   session with CSRF token) and executes as that user.
+- **Profiles govern what the AI does over MCP, not what the key can do elsewhere.** Whoever holds the
+  API key could call ERPNext's regular REST API directly with that user's full ERPNext permissions.
+  Treat the key like the user's password and give the integration user only the ERPNext roles the AI
+  genuinely needs — ERPNext permissions are the outer wall; profiles narrow the AI inside it.
 - Arguments are validated against strict schemas; field names, operators and sort keys are
   allow-listed, and filtering or sorting on a hidden field is refused.
 - Writes run inside a savepoint: a call that fails, or would move a record outside the caller's
-  scope, leaves nothing behind.
+  scope, leaves nothing behind — its queued webhooks, background jobs and realtime events are
+  dropped too.
 - Every tool call is written to **MCP Audit Log** (who, what, target, result, duration, client IP),
-  with passwords, tokens and keys masked. Retention is configurable.
+  with passwords, tokens and keys masked. Retention is configurable. Logged arguments can contain
+  record values, so only System Managers see them; MCP Managers see redacted entries.
+- Report Builder reports can only be filtered on their own columns, so hidden fields cannot be
+  probed through report filters.
 - Browser requests are accepted only from the site itself or origins you list in Settings.
 - Per-user rate limiting (default 120 requests/minute).
 
@@ -351,7 +368,8 @@ deleted with the app's DocTypes), then `bench remove-app mcp_connector`.
   the app sees them, so they return Frappe's error format instead of a JSON-RPC error.
 - MCP's OAuth discovery flow is not supported; use API keys (Frappe v14 has no dynamic client registration).
 - When one user matches several profiles with *different* record scopes on the same DocType,
-  listing merges the scopes in memory; this is exact but re-reads rows for deep pages.
+  listing merges the scoped queries in memory and can page only within the first 5,000 rows (add
+  filters to reach further); the merged order emulates MariaDB's case-insensitive collation.
 - Reports whose filters are built dynamically in JavaScript are described without filter details.
 
 ---

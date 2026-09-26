@@ -56,17 +56,17 @@ class ToolCatalog:
 	def __init__(self, gateway: ErpGateway):
 		self.gateway = gateway
 
-	def doctypes_for(self, policy: EffectivePolicy, operation: str, allowed: PermissionCheck) -> list:
+	def doctypes_for(self, policy: EffectivePolicy, operation: str, allowed: PermissionCheck, tool: str = None) -> list:
 		def usable(doctype: str, op: str) -> bool:
 			return is_exposable(doctype) and (op == READ or is_writable(doctype)) and allowed(doctype, FRAPPE_PTYPE[op])
 
 		if operation == ANY_OPERATION:
-			return [dt for dt in policy.doctypes() if any(usable(dt, op) for op in policy.operations_for(dt))]
-		return [dt for dt in policy.doctypes_for(operation) if usable(dt, operation)]
+			return [dt for dt in policy.doctypes() if any(usable(dt, op) for op in policy.operations_for(dt, tool))]
+		return [dt for dt in policy.doctypes_for(operation, tool) if usable(dt, operation)]
 
-	def reports_for(self, policy: EffectivePolicy, report_allowed: Optional[Callable[[str], bool]] = None) -> list:
+	def reports_for(self, policy: EffectivePolicy, report_allowed: Optional[Callable[[str], bool]] = None, tool: str = None) -> list:
 		result = []
-		for report in policy.reports():
+		for report in policy.reports(tool):
 			info = self.gateway.report_info(report)
 			if info is not None and (report_allowed(report) if report_allowed else info.permitted):
 				result.append(report)
@@ -81,8 +81,6 @@ class ToolCatalog:
 		report_allowed: Optional[Callable[[str], bool]] = None,
 	) -> list:
 		allowed = allowed or self.gateway.has_permission
-		reports = None
-		doctype_cache: dict = {}
 		descriptors = []
 		for name in sorted(policy.tools):
 			action = actions.get(name)
@@ -98,13 +96,12 @@ class ToolCatalog:
 					max_report_rows=settings.max_report_rows,
 				)
 				if tool.operation:
-					if tool.operation not in doctype_cache:
-						doctype_cache[tool.operation] = self.doctypes_for(policy, tool.operation, allowed)
-					if not doctype_cache[tool.operation]:
+					doctypes = self.doctypes_for(policy, tool.operation, allowed, name)
+					if not doctypes:
 						continue
-					ctx = replace(ctx, doctypes=tuple(doctype_cache[tool.operation]))
+					ctx = replace(ctx, doctypes=tuple(doctypes))
 				if tool.needs_reports:
-					reports = self.reports_for(policy, report_allowed) if reports is None else reports
+					reports = self.reports_for(policy, report_allowed, name)
 					if not reports:
 						continue
 					ctx = replace(ctx, reports=tuple(reports))
@@ -206,7 +203,7 @@ class CallTool:
 			raise RpcError(INVALID_PARAMS, f"Unknown tool: {name}")
 
 		started = time.perf_counter()
-		ctx = ToolContext(policy=session.policy, settings=session.settings, gateway=self.gateway)
+		ctx = ToolContext(policy=session.policy, settings=session.settings, gateway=self.gateway, tool=name)
 		structured = session.protocol_version >= "2025-06-18"
 		try:
 			args = validate_arguments(descriptor["inputSchema"], arguments)

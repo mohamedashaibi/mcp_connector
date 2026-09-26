@@ -13,6 +13,7 @@ from mcp_connector.domain.policy import (
 	match_reason,
 	parse_field_list,
 	resolve_policy,
+	union_rules,
 )
 
 ACTIONS = [
@@ -151,8 +152,8 @@ class TestDoctypeGrants(unittest.TestCase):
 		p = profile("P", users=frozenset({"u"}), action_types=frozenset({READ, UPDATE}), doctypes=(rule,))
 		policy = resolve_policy("u", [], [p], ACTIONS)
 		self.assertEqual(policy.operations_for("Customer"), [READ, UPDATE])
-		self.assertIsNone(policy.grant("Customer", DELETE))
-		self.assertIsNone(policy.grant("Item", READ))
+		self.assertEqual(policy.grants("Customer", DELETE), [])
+		self.assertEqual(policy.grants("Item", READ), [])
 
 	def test_doctypes_for_operation(self):
 		p = profile(
@@ -169,46 +170,55 @@ class TestDoctypeGrants(unittest.TestCase):
 		self.assertEqual(policy.doctypes_for(SUBMIT), ["Sales Invoice"])
 		self.assertEqual(policy.doctypes_for(CANCEL), [])
 
-	def test_scopes_merge_as_or(self):
-		a = profile("A", users=frozenset({"u"}), doctypes=(DoctypeRule("Task", frozenset({READ}), scope=(("status", "=", "Open"),)),))
-		b = profile("B", users=frozenset({"u"}), doctypes=(DoctypeRule("Task", frozenset({READ}), scope=(("priority", "=", "High"),)),))
-		grant = resolve_policy("u", [], [a, b], ACTIONS).grant("Task", READ)
-		self.assertEqual(grant.scopes, ((("status", "=", "Open"),), (("priority", "=", "High"),)))
+	def test_each_profile_stays_a_separate_alternative(self):
+		# Regression for the review finding: fields of one profile must never combine with rows of another.
+		a = profile("A", users=frozenset({"u"}), doctypes=(DoctypeRule("Customer", frozenset({READ}), scope=(("territory", "=", "X"),)),))
+		b = profile("B", users=frozenset({"u"}), doctypes=(DoctypeRule("Customer", frozenset({READ}), FieldRule(ONLY_LISTED, frozenset({"customer_name"}))),))
+		grants = resolve_policy("u", [], [a, b], ACTIONS).grants("Customer", READ)
+		self.assertEqual([(g.profile, g.field_rule.mode, g.scope) for g in grants], [
+			("A", ALL_FIELDS, (("territory", "=", "X"),)),
+			("B", ONLY_LISTED, ()),
+		])
 
-	def test_unscoped_grant_wins(self):
-		a = profile("A", users=frozenset({"u"}), doctypes=(DoctypeRule("Task", frozenset({READ}), scope=(("status", "=", "Open"),)),))
-		b = profile("B", users=frozenset({"u"}), doctypes=(DoctypeRule("Task", frozenset({READ})),))
-		self.assertIsNone(resolve_policy("u", [], [a, b], ACTIONS).grant("Task", READ).scopes)
+	def test_grants_follow_the_tool_being_used(self):
+		# A enables delete_document but grants no DocType; B grants Delete but not the tool.
+		a = profile("A", users=frozenset({"u"}), action_types=frozenset({READ, DELETE}), actions=frozenset({"delete_document"}))
+		b = profile(
+			"B",
+			users=frozenset({"u"}),
+			action_types=frozenset({READ, DELETE}),
+			actions=frozenset({"list_documents"}),
+			doctypes=(DoctypeRule("Customer", frozenset({READ, DELETE})),),
+		)
+		policy = resolve_policy("u", [], [a, b], ACTIONS)
+		self.assertTrue(policy.allows_tool("delete_document"))
+		self.assertEqual(policy.grants("Customer", DELETE, "delete_document"), [])
+		self.assertEqual(policy.doctypes_for(DELETE, "delete_document"), [])
+		self.assertEqual(len(policy.grants("Customer", DELETE)), 1)
 
-	def test_identical_scopes_are_deduplicated_even_with_list_values(self):
-		scope = (("status", "in", ["Open", "Working"]),)
-		a = profile("A", users=frozenset({"u"}), doctypes=(DoctypeRule("Task", frozenset({READ}), scope=scope),))
-		b = profile("B", users=frozenset({"u"}), doctypes=(DoctypeRule("Task", frozenset({READ}), scope=scope),))
-		self.assertEqual(resolve_policy("u", [], [a, b], ACTIONS).grant("Task", READ).scopes, (scope,))
-
-	def test_field_rules_union_across_profiles(self):
+	def test_union_rules_and_visible_fields(self):
 		a = profile("A", users=frozenset({"u"}), doctypes=(DoctypeRule("Employee", frozenset({READ}), FieldRule(ONLY_LISTED, frozenset({"first_name"}))),))
 		b = profile("B", users=frozenset({"u"}), doctypes=(DoctypeRule("Employee", frozenset({READ}), FieldRule(ONLY_LISTED, frozenset({"department"}))),))
-		rule = resolve_policy("u", [], [a, b], ACTIONS).grant("Employee", READ).field_rule
-		self.assertEqual(rule.fields, frozenset({"first_name", "department"}))
-
-	def test_visible_field_rule_spans_operations(self):
-		p = profile(
-			"P",
-			users=frozenset({"u"}),
-			action_types=frozenset({READ, CREATE}),
-			doctypes=(DoctypeRule("ToDo", frozenset({READ, CREATE}), FieldRule(ONLY_LISTED, frozenset({"description"}))),),
-		)
-		policy = resolve_policy("u", [], [p], ACTIONS)
-		self.assertEqual(policy.visible_field_rule("ToDo").fields, frozenset({"description"}))
+		policy = resolve_policy("u", [], [a, b], ACTIONS)
+		self.assertEqual(union_rules(policy.grants("Employee", READ)).fields, frozenset({"first_name", "department"}))
+		self.assertEqual(policy.visible_field_rule("Employee").fields, frozenset({"first_name", "department"}))
 		self.assertIsNone(policy.visible_field_rule("Note"))
+		self.assertIsNone(union_rules([]))
 
-	def test_notes_are_collected(self):
+	def test_notes_are_kept_per_grant(self):
 		p = profile("P", users=frozenset({"u"}), doctypes=(DoctypeRule("Lead", frozenset({READ}), notes="Only B2B"),))
-		self.assertEqual(resolve_policy("u", [], [p], ACTIONS).grant("Lead", READ).notes, ("Only B2B",))
+		self.assertEqual(resolve_policy("u", [], [p], ACTIONS).grants("Lead", READ)[0].notes, "Only B2B")
 
 
 class TestReportGrants(unittest.TestCase):
+	def test_report_grants_follow_the_tool(self):
+		a = profile("A", users=frozenset({"u"}), action_types=frozenset({REPORT}), actions=frozenset({"run_report"}), reports=(ReportRule("GL", {"company": "ACME"}),))
+		b = profile("B", users=frozenset({"u"}), action_types=frozenset({REPORT}), actions=frozenset(), reports=(ReportRule("GL"),))
+		policy = resolve_policy("u", [], [a, b], ACTIONS)
+		# B grants GL without fixed filters but does not enable run_report: A's fixed filter must hold.
+		self.assertEqual(policy.report_grant("GL", "run_report").resolve_filters({"company": "Other"}), {"company": "ACME"})
+		self.assertEqual(policy.reports("run_report"), ["GL"])
+
 	def test_reports_need_report_type(self):
 		p = profile("P", users=frozenset({"u"}), action_types=frozenset({READ}), reports=(ReportRule("General Ledger"),))
 		self.assertEqual(resolve_policy("u", [], [p], ACTIONS).reports(), [])
