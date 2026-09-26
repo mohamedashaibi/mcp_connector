@@ -24,6 +24,9 @@ permission_query_conditions = {
 	"MCP Audit Log": "mcp_connector.infrastructure.permissions.administrator_only_query",
 }
 
+# OAuth discovery documents under /.well-known/, so MCP clients (Claude connectors) can sign people in.
+page_renderer = ["mcp_connector.api.discovery.OAuthDiscoveryRenderer"]
+
 scheduler_events = {
 	"daily": ["mcp_connector.infrastructure.audit.purge_old_logs"],
 }

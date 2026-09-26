@@ -133,3 +133,58 @@ def set_enabled(enabled):
 	settings.save(ignore_permissions=True)
 	frappe.db.commit()
 	return {"enabled": settings.enabled}
+
+
+OAUTH_CLIENT = "MCP E2E OAuth Client"
+OAUTH_PASSWORD = "Mcp#Signs-In-2026"  # development fixture only
+
+
+def oauth_setup(redirect_uri):
+	"""An OAuth client redirecting to the gate's local callback, and the sales user able to sign in.
+
+	Also returns the tools the endpoint lists for that user when called in-process, so the gate
+	can check the OAuth path sees exactly the same profile."""
+	from frappe.utils.password import update_password
+
+	from mcp_connector.api.mcp import build_handler, build_session
+	from mcp_connector.infrastructure.settings import load_settings
+
+	keys = setup()
+	update_password(F.SALES_USER, OAUTH_PASSWORD)
+	name = frappe.db.get_value("OAuth Client", {"app_name": OAUTH_CLIENT}, "name")
+	client = frappe.get_doc("OAuth Client", name) if name else frappe.new_doc("OAuth Client")
+	client.update(
+		{
+			"app_name": OAUTH_CLIENT,
+			"scopes": "all openid",
+			"redirect_uris": redirect_uri,
+			"default_redirect_uri": redirect_uri,
+			"grant_type": "Authorization Code",
+			"response_type": "Code",
+			"skip_authorization": 0,
+		}
+	)
+	client.save(ignore_permissions=True)
+	frappe.db.set_value("OAuth Bearer Token", {"user": F.SALES_USER, "status": "Active"}, "status", "Revoked")
+	frappe.db.commit()
+
+	session = build_session(F.SALES_USER, load_settings())
+	listed = build_handler().execute({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, session)
+	return {
+		"user": F.SALES_USER,
+		"password": OAUTH_PASSWORD,
+		"client_id": client.client_id,
+		"client_secret": client.client_secret,
+		"expected_tools": sorted(t["name"] for t in listed["result"]["tools"]),
+		"order_doctype": F.ORDER,
+		"was_enabled": keys["was_enabled"],
+	}
+
+
+def expire_oauth_tokens(user):
+	"""Make the user's access tokens expire now, so the client has to use its refresh token."""
+	frappe.only_for("System Manager")
+	for name in frappe.get_all("OAuth Bearer Token", filters={"user": user, "status": "Active"}, pluck="name"):
+		frappe.db.set_value("OAuth Bearer Token", name, "expiration_time", frappe.utils.add_to_date(None, minutes=-5))
+	frappe.db.commit()
+	return {"expired": True}

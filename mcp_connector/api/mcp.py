@@ -25,6 +25,7 @@ from mcp_connector.application.mcp_server import (
 	ToolCatalog,
 )
 from mcp_connector.domain import audit as audit_rules
+from mcp_connector.domain import oauth
 from mcp_connector.domain.jsonrpc import (
 	ACCESS_DENIED,
 	INTERNAL_ERROR,
@@ -138,8 +139,13 @@ def endpoint():
 
 	user = frappe.session.user
 	if not user or user == "Guest":
+		# The challenge points OAuth clients (Claude connectors) at the discovery documents.
 		return _error(
-			401, request_id, ACCESS_DENIED, "Authentication required: send 'Authorization: token <api_key>:<api_secret>'"
+			401,
+			request_id,
+			ACCESS_DENIED,
+			"Authentication required: sign in with OAuth, or send 'Authorization: token <api_key>:<api_secret>'",
+			{"WWW-Authenticate": oauth.bearer_challenge(get_url(), ENDPOINT_PATH)},
 		)
 	if not settings.enabled:
 		return _error(403, request_id, ACCESS_DENIED, "The MCP server is disabled on this site")

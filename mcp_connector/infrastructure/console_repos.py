@@ -450,3 +450,41 @@ class FrappeDirectory:
 
 		secret = generate_keys(user)["api_secret"]
 		return {"user": user, "api_key": frappe.db.get_value("User", user, "api_key"), "api_secret": secret}
+
+
+class FrappeOAuthClientRepository:
+	"""OAuth clients in Frappe's own OAuth provider (the OAuth Client DocType)."""
+
+	def find(self, app_name: str) -> Optional[dict]:
+		names = frappe.get_all("OAuth Client", filters={"app_name": app_name}, order_by="creation asc", pluck="name", limit=1)
+		return self._info(names[0]) if names else None
+
+	def create(self, app_name: str, redirect_uris: tuple) -> dict:
+		doc = frappe.get_doc(
+			{
+				"doctype": "OAuth Client",
+				"app_name": app_name,
+				"scopes": "all openid",
+				"redirect_uris": " ".join(redirect_uris),  # Frappe separates redirect URIs with spaces
+				"default_redirect_uri": redirect_uris[0],
+				"grant_type": "Authorization Code",
+				"response_type": "Code",
+				"skip_authorization": 0,  # every person approves access on ERPNext's consent screen
+			}
+		).insert()
+		return self._info(doc.name)
+
+	@staticmethod
+	def _info(name: str) -> dict:
+		doc = frappe.get_doc("OAuth Client", name)
+		signed_in = frappe.get_all(
+			"OAuth Bearer Token", filters={"client": name, "status": "Active"}, pluck="user", distinct=True
+		)
+		return {
+			"name": doc.name,
+			"app_name": doc.app_name,
+			"client_id": doc.client_id,
+			"client_secret": doc.client_secret,
+			"redirect_uris": (doc.redirect_uris or "").split(),
+			"signed_in_users": len(set(signed_in)),
+		}

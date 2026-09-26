@@ -26,5 +26,6 @@ bench --site "$SITE" set-config allow_tests true >/dev/null
 bench --site "$SITE" set-config server_script_enabled true >/dev/null
 bench set-config -g server_script_enabled 1 >/dev/null  # v15 reads it from common_site_config only
 bench --site "$SITE" set-config developer_mode 0 >/dev/null
+bench --site "$SITE" clear-cache >/dev/null  # hooks are cached in Redis; pick up hooks.py edits
 echo "$SITE" > sites/currentsite.txt
 echo "SETUP DONE $SITE"

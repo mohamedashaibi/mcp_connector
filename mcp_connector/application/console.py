@@ -7,6 +7,7 @@ from mcp_connector.domain.action_types import ACTION_TYPES, DOC_OPERATIONS, FRAP
 from mcp_connector.domain.audit import DENIED, ERROR, SUCCESS
 from mcp_connector.domain.catalog import BUILTIN_TOOLS, OPERATION_TOOLS
 from mcp_connector.domain.errors import InvalidArguments, NotFound
+from mcp_connector.domain.oauth import CLAUDE_CLIENT_NAME, CLAUDE_REDIRECT_URIS
 from mcp_connector.domain.policy import ALL_FIELDS, EffectivePolicy, match_reason, resolve_policy
 from mcp_connector.domain.protected import NEVER_EXPOSED, READ_ONLY, is_exposable, is_writable
 
@@ -71,6 +72,12 @@ class Directory(Protocol):
 	def report_permitted(self, report: str, user: str) -> bool: ...
 
 	def generate_keys(self, user: str) -> dict: ...
+
+
+class OAuthClientRepository(Protocol):
+	def find(self, app_name: str) -> Optional[dict]: ...  # {client_id, client_secret, redirect_uris, active_tokens, ...}
+
+	def create(self, app_name: str, redirect_uris: tuple) -> dict: ...
 
 
 class CatalogRepository(Protocol):
@@ -426,3 +433,24 @@ class GenerateKeys:
 			raise InvalidArguments("Guest cannot have API keys")
 		return self.directory.generate_keys(user)
 
+
+# -- Claude connector (OAuth) ---------------------------------------------------------
+
+
+class GetClaudeConnector:
+	def __init__(self, clients: OAuthClientRepository):
+		self.clients = clients
+
+	def execute(self) -> dict:
+		return {"client": self.clients.find(CLAUDE_CLIENT_NAME), "redirect_uris": list(CLAUDE_REDIRECT_URIS)}
+
+
+class CreateClaudeConnector:
+	"""The OAuth client Claude signs people in with. Idempotent: one client serves every user."""
+
+	def __init__(self, clients: OAuthClientRepository):
+		self.clients = clients
+
+	def execute(self) -> dict:
+		client = self.clients.find(CLAUDE_CLIENT_NAME) or self.clients.create(CLAUDE_CLIENT_NAME, CLAUDE_REDIRECT_URIS)
+		return {"client": client, "redirect_uris": list(CLAUDE_REDIRECT_URIS)}

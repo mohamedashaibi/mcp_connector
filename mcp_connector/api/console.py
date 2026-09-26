@@ -18,6 +18,7 @@ from mcp_connector.infrastructure.console_repos import (
 	FrappeAuditQuery,
 	FrappeCatalogRepository,
 	FrappeDirectory,
+	FrappeOAuthClientRepository,
 	FrappeProfileRepository,
 	FrappeSettingsRepository,
 	doctype_flags,
@@ -208,3 +209,19 @@ def log_detail(name):
 def generate_keys(user):
 	_require_manager()
 	return _run(uc.GenerateKeys(FrappeDirectory()).execute, user)
+
+
+@frappe.whitelist()
+def claude_connector():
+	_require_manager()
+	data = uc.GetClaudeConnector(FrappeOAuthClientRepository()).execute()
+	data["connector_url"] = frappe.utils.get_url(ENDPOINT_PATH)
+	return data
+
+
+@frappe.whitelist(methods=["POST"])
+def create_claude_connector():
+	_require_manager()
+	data = uc.CreateClaudeConnector(FrappeOAuthClientRepository()).execute()
+	data["connector_url"] = frappe.utils.get_url(ENDPOINT_PATH)
+	return data
