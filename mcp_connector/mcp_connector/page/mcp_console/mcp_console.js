@@ -111,7 +111,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 			this.settings_draft = null;
 			this.activity = { status: "", user: "", tool: "", hours: 24, rows: [], has_more: false };
 			this.dash_hours = 24;
-			this.connect = { user: "", keys: null, client: "claude_code", test: null };
+			this.connect = { mode: "claude", user: "", keys: null, client: "claude_code", test: null, claude: null, discovery: null };
 			this.field_cache = {};
 			this.report_cache = {};
 			this.build_shell();
@@ -336,6 +336,8 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				"more-logs": () => this.load_logs(false),
 				"generate-keys": () => this.generate_keys(),
 				"run-test": () => this.run_test(),
+				"create-claude-client": () => this.create_claude_client(el),
+				"check-discovery": () => this.check_discovery(),
 				"toggle-setting": () => this.toggle_setting(el.dataset.field),
 				"save-settings": () => this.save_settings(),
 				"discard-settings": () => {
@@ -356,6 +358,10 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 			} else if (name === "log-status") {
 				this.activity.status = value;
 				this.load_logs(true);
+			} else if (name === "connect-mode") {
+				this.connect.mode = value;
+				this.render_connect();
+				return;
 			} else if (name === "client") {
 				this.connect.client = value;
 				this.render_connect_snippet();
@@ -2074,16 +2080,26 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 
 		// ===================================================================== connect
 		render_connect() {
-			const c = this.connect;
 			set_html(
 				this.$main,
 				`<header class="mcpc-head">
 					<div>
 						<h1 class="mcpc-title">${esc(__("Connect a client"))}</h1>
-						<p class="mcpc-lede">${esc(__("MCP clients connect over Streamable HTTP and sign in as a real ERPNext user with an API key. That user's roles pick the access profile, and their ERPNext permissions still apply."))}</p>
+						<p class="mcpc-lede">${esc(__("Every request runs as a real ERPNext user: that user's roles pick the access profile, and their ERPNext permissions still apply. Add the connector link in Claude so each person signs in as themselves, or give a tool an API key of one integration user."))}</p>
 					</div>
 				</header>
-				<ol class="mcpc-flow">
+				<div class="mcpc-connect-mode">${segmented("connect-mode", [["claude", __("Claude connector link")], ["apikey", __("API key")]], this.connect.mode, __("How clients sign in"))}</div>
+				<div class="mcpc-connect-body"></div>`
+			);
+			if (this.connect.mode === "claude") this.render_connect_claude();
+			else this.render_connect_apikey();
+		}
+
+		render_connect_apikey() {
+			const c = this.connect;
+			set_html(
+				this.$main.querySelector(".mcpc-connect-body"),
+				`<ol class="mcpc-flow">
 					<li>
 						<h2 class="mcpc-h3">${esc(__("Endpoint"))}</h2>
 						<div class="mcpc-endpoint mcpc-endpoint--lg"><code>${esc(this.data.endpoint)}</code>
@@ -2132,6 +2148,146 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 			}
 			this.render_connect_keys();
 			this.render_test();
+		}
+
+		render_connect_claude() {
+			const how = (template, parts) => __(template, parts.map(bold));
+			set_html(
+				this.$main.querySelector(".mcpc-connect-body"),
+				`<ol class="mcpc-flow">
+					<li>
+						<h2 class="mcpc-h3">${esc(__("Connector URL"))}</h2>
+						<div class="mcpc-endpoint mcpc-endpoint--lg"><code>${esc(this.data.endpoint)}</code>
+						<button type="button" class="btn btn-default btn-sm" data-act="copy-endpoint">${icon("copy", 14)}<span>${esc(__("Copy"))}</span></button></div>
+						<p class="mcpc-help">${esc(__("Claude connects from Anthropic's servers, so this site has to answer at exactly this address over public HTTPS."))}</p>
+					</li>
+					<li>
+						<h2 class="mcpc-h3">${esc(__("Client ID for Claude"))}</h2>
+						<p class="mcpc-help">${esc(__("Create it once; everyone who connects shares it, and each person still signs in as themselves."))}</p>
+						<div class="mcpc-claude-client" aria-live="polite"></div>
+					</li>
+					<li>
+						<h2 class="mcpc-h3">${esc(__("Add it in Claude"))}</h2>
+						<ol class="mcpc-howto">
+							<li>${how("Open {0}, choose {1}, then {2}.", ["Customize → Connectors", "+", "Add custom connector"])}
+								<span class="mcpc-howto__aside">${how("On Team and Enterprise plans an owner does this in {0}.", ["Organization settings → Connectors → Add → Custom → Web"])}</span></li>
+							<li>${esc(__("Name it, for example ERPNext, and paste the connector URL."))}</li>
+							<li>${how("Open {0} and paste the client ID and client secret.", ["Advanced settings"])}</li>
+							<li>${how("Choose {0}.", ["Add"])}</li>
+						</ol>
+					</li>
+					<li>
+						<h2 class="mcpc-h3">${esc(__("Each person signs in"))}</h2>
+						<p class="mcpc-help">${esc(__("They choose Connect, sign in to ERPNext and allow access. Their roles decide the profile; someone no profile covers gets no tools."))}</p>
+					</li>
+					<li>
+						<h2 class="mcpc-h3">${esc(__("Check sign-in discovery"))}</h2>
+						<p class="mcpc-help">${esc(__("Loads the documents Claude reads before sign-in, through the address you are using now."))}</p>
+						<button type="button" class="btn btn-default btn-sm" data-act="check-discovery">${esc(__("Run check"))}</button>
+						<div class="mcpc-discovery" aria-live="polite"></div>
+					</li>
+				</ol>`
+			);
+			this.render_claude_client();
+			this.render_discovery();
+			if (!this.connect.claude) this.load_claude_client();
+		}
+
+		async load_claude_client() {
+			try {
+				this.connect.claude = await this.call("claude_connector");
+			} catch (e) {
+				this.connect.claude = { client: null, failed: true };
+			}
+			this.render_claude_client();
+		}
+
+		render_claude_client() {
+			const $el = this.$main.querySelector(".mcpc-claude-client");
+			if (!$el) return;
+			const info = this.connect.claude;
+			const client = info && info.client;
+			if (!info) {
+				set_html($el, `<p class="mcpc-help" aria-busy="true">${esc(__("Loading…"))}</p>`);
+			} else if (!client) {
+				set_html(
+					$el,
+					`<button type="button" class="btn btn-primary btn-sm" data-act="create-claude-client">${esc(__("Create client for Claude"))}</button>
+					${info.failed ? `<p class="mcpc-warnline">${icon("alert", 14)}${esc(__("Could not load the client. Reload the page and try again."))}</p>` : ""}`
+				);
+			} else {
+				const row = (label, value) =>
+					`<div><dt>${esc(label)}</dt><dd class="mcpc-mono">${esc(value)} <button type="button" class="mcpc-iconbtn" data-act="copy-text" data-text="${esc(value)}" data-what="${esc(label)}" aria-label="${esc(__("Copy {0}", [label]))}">${icon("copy", 14)}</button></dd></div>`;
+				set_html(
+					$el,
+					`<dl class="mcpc-meta mcpc-claude-keys">${row(__("Client ID"), client.client_id)}${row(__("Client secret"), client.client_secret)}</dl>
+					<p class="mcpc-help">${esc(
+						client.signed_in_users
+							? __("{0} signed in through Claude so far.", [plural(client.signed_in_users, __("person"), __("people"))])
+							: __("Nobody has signed in through Claude yet.")
+					)} <a href="/app/oauth-client/${encodeURIComponent(client.name)}">${esc(__("Manage in ERPNext"))}</a></p>`
+				);
+			}
+		}
+
+		async create_claude_client(button) {
+			button.disabled = true;
+			button.setAttribute("aria-busy", "true");
+			try {
+				this.connect.claude = await this.call("create_claude_connector", {}, true);
+			} catch (e) {
+				button.disabled = false;
+				button.removeAttribute("aria-busy");
+				return;
+			}
+			this.render_claude_client();
+		}
+
+		async check_discovery() {
+			const endpoint = new URL(this.data.endpoint);
+			const steps = [];
+			const load = async (path) => {
+				const res = await fetch(path, { credentials: "omit", headers: { Accept: "application/json" } });
+				if (!res.ok) throw new Error(__("{0} answered HTTP {1}", [path, res.status]));
+				return res.json();
+			};
+			this.connect.discovery = { running: true, steps };
+			this.render_discovery();
+			const https = endpoint.protocol === "https:";
+			steps.push({ key: "https", ok: https, text: https ? __("The connector URL uses HTTPS") : __("Claude needs HTTPS; this site announces itself over plain HTTP") });
+			if (endpoint.origin !== window.location.origin) {
+				steps.push({
+					key: "origin",
+					ok: false,
+					text: __("You opened ERPNext at {0}, but it announces itself as {1}. Set host_name in the site config to the public address.", [window.location.origin, endpoint.origin]),
+				});
+			}
+			try {
+				const resource = await load(`/.well-known/oauth-protected-resource${endpoint.pathname}`);
+				steps.push({ key: "resource", ok: resource.resource === this.data.endpoint, text: __("Resource metadata names this connector URL"), detail: resource.resource });
+				const server = await load("/.well-known/oauth-authorization-server");
+				const pkce = (server.code_challenge_methods_supported || []).includes("S256");
+				steps.push({ key: "server", ok: pkce, text: __("Sign-in server supports PKCE (S256)"), detail: server.authorization_endpoint });
+			} catch (e) {
+				steps.push({ key: "load", ok: false, text: __("Could not load a discovery document. Make sure the web server passes /.well-known/ to ERPNext."), detail: e.message });
+			}
+			this.connect.discovery = { running: false, steps };
+			this.render_discovery();
+		}
+
+		render_discovery() {
+			const $el = this.$main.querySelector(".mcpc-discovery");
+			const d = this.connect.discovery;
+			if (!$el || !d) return;
+			set_html(
+				$el,
+				`<ul class="mcpc-checks">${d.steps
+					.map(
+						(s) =>
+							`<li class="${s.ok ? "is-ok" : "is-bad"}" data-check="${esc(s.key)}">${icon(s.ok ? "check" : "x", 14)}<span>${esc(s.text)}${s.detail ? `<small class="mcpc-mono">${esc(s.detail)}</small>` : ""}</span></li>`
+					)
+					.join("")}${d.running ? `<li class="is-pending">${esc(__("Running…"))}</li>` : ""}</ul>`
+			);
 		}
 
 		async check_connect_user() {

@@ -79,6 +79,8 @@ class TestConsoleApi(McpTestCase):
 				lambda: console.inspect_user(F.SALES_USER),
 				lambda: console.save_settings("{}"),
 				lambda: console.generate_keys(F.SALES_USER),
+				console.claude_connector,
+				console.create_claude_connector,
 			):
 				with self.assertRaises(frappe.PermissionError, msg=user):
 					call()
@@ -235,3 +237,33 @@ class TestConsoleApi(McpTestCase):
 		self.assertEqual(len(dash["series"]["labels"]), 24)
 		with self.assertRaises(frappe.ValidationError):
 			console.logs(json.dumps({"status": "Hacked"}))
+
+
+class TestClaudeConnector(McpTestCase):
+	def test_console_creates_one_claude_client_with_exactly_claudes_callbacks(self):
+		from mcp_connector.domain.oauth import CLAUDE_CLIENT_NAME, CLAUDE_REDIRECT_URIS
+
+		frappe.set_user("Administrator")
+		self.assertIsNone(console.claude_connector()["client"])  # positive control: nothing yet
+		created = console.create_claude_connector()
+		self.addCleanup(frappe.delete_doc, "OAuth Client", created["client"]["name"], ignore_permissions=True, force=True)
+		client = created["client"]
+		self.assertEqual(client["redirect_uris"], list(CLAUDE_REDIRECT_URIS))
+		self.assertTrue(client["client_id"] and client["client_secret"])
+		self.assertTrue(created["connector_url"].endswith("/api/method/mcp_connector.api.mcp.endpoint"))
+		self.assertEqual(console.create_claude_connector()["client"]["client_id"], client["client_id"])
+		self.assertEqual(console.claude_connector()["client"]["client_id"], client["client_id"])
+		self.assertEqual(frappe.db.count("OAuth Client", {"app_name": CLAUDE_CLIENT_NAME}), 1)
+		doc = frappe.get_doc("OAuth Client", client["name"])
+		self.assertEqual((doc.grant_type, doc.response_type, doc.skip_authorization), ("Authorization Code", "Code", 0))
+
+	def test_discovery_documents_are_served_only_at_their_paths(self):
+		from mcp_connector.api.discovery import OAuthDiscoveryRenderer
+
+		server = json.loads(OAuthDiscoveryRenderer(".well-known/oauth-authorization-server", 200).render().get_data())
+		self.assertEqual(server["code_challenge_methods_supported"], ["S256"])
+		resource = OAuthDiscoveryRenderer(".well-known/oauth-protected-resource/api/method/mcp_connector.api.mcp.endpoint", 200)
+		self.assertTrue(resource.can_render())
+		self.assertEqual(json.loads(resource.render().get_data())["authorization_servers"], [server["issuer"]])
+		for path in (".well-known/openid-configuration", ".well-known/oauth-protected-resource/api/method/frappe.ping", "login"):
+			self.assertFalse(OAuthDiscoveryRenderer(path, 200).can_render(), path)

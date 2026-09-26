@@ -207,8 +207,26 @@ async function shoot(page, name) {
 	await page.goto(`${BASE_URL}/app/mcp-console/inspector/Administrator`, { waitUntil: "networkidle" });
 	await page.locator(".mcpc-person").waitFor({ timeout: 15000 });
 
-	// Connect snippets switch clients.
+	// Connect: the Claude connector link comes first.
 	await nav(page, "connect");
+	check((await page.locator('[data-seg="connect-mode"][data-value="claude"]').getAttribute("aria-checked")) === "true", "Connect should open on the Claude connector link");
+	const createClient = page.locator('[data-act="create-claude-client"]');
+	await Promise.race([createClient.waitFor({ timeout: 15000 }), page.locator(".mcpc-claude-keys").waitFor({ timeout: 15000 })]).catch(() => {});
+	if (await createClient.count()) await createClient.click();
+	await page.locator(".mcpc-claude-keys").waitFor({ timeout: 15000 });
+	const claudeClient = await api(page, "claude_connector");
+	check((await page.locator(".mcpc-claude-keys").innerText()).includes(claudeClient.client.client_id), "Claude client ID not shown");
+	await page.locator('[data-act="check-discovery"]').click();
+	await page.locator('.mcpc-discovery [data-check="server"], .mcpc-discovery [data-check="load"]').first().waitFor({ timeout: 15000 });
+	for (const key of ["resource", "server"]) {
+		check((await page.locator(`.mcpc-discovery li.is-ok[data-check="${key}"]`).count()) === 1, `discovery check ${key} should pass`);
+	}
+	// Positive control for the check itself: the dev bench serves plain HTTP, which Claude refuses.
+	check((await page.locator('.mcpc-discovery li.is-bad[data-check="https"]').count()) === 1, "discovery check should flag plain HTTP");
+	await shoot(page, "light-desktop-connect-claude");
+
+	// API key clients: snippets switch per client.
+	await page.locator('[data-seg="connect-mode"][data-value="apikey"]').click();
 	await page.locator('[data-seg="client"][data-value="cursor"]').click();
 	check((await page.locator(".mcpc-snippet pre").innerText()).includes('"mcpServers"'), "Cursor snippet not shown");
 	await page.locator('[data-seg="client"][data-value="claude_code"]').click();

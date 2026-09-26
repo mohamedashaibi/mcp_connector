@@ -1822,6 +1822,40 @@
 	top: -2px;
 }
 
+.mcpc-connect-mode {
+	margin: -12px 0 36px;
+}
+
+.mcpc-howto {
+	display: grid;
+	gap: 10px;
+	max-width: 62ch;
+	margin: 4px 0 0;
+	padding-inline-start: 22px;
+}
+
+.mcpc-howto li {
+	padding-inline-start: 6px;
+	line-height: 1.55;
+}
+
+.mcpc-howto li::marker {
+	color: var(--c-muted);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.mcpc-howto b {
+	font-weight: 600;
+}
+
+.mcpc-howto__aside {
+	display: block;
+	margin-top: 2px;
+	color: var(--c-muted);
+	font-size: 13px;
+}
+
 .mcpc-flow .mcpc-h3 {
 	margin: 0 0 8px;
 	font-size: 16px;
