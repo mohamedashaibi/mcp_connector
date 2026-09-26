@@ -130,6 +130,19 @@ try {
 	const again = (await client.listTools()).tools.map((t) => t.name).sort();
 	check(provider.saved.access_token !== firstToken, "an expired access token should have been refreshed");
 	check(JSON.stringify(again) === JSON.stringify(tools), "tools after refresh should match");
+
+	// ---- disabling the ERPNext user cuts the session off, although the token stays valid
+	execute("mcp_connector.tests.e2e_setup.set_user_enabled", { user: env.user, enabled: 0 });
+	let blocked = null;
+	try {
+		await client.listTools();
+	} catch (e) {
+		blocked = e;
+	} finally {
+		execute("mcp_connector.tests.e2e_setup.set_user_enabled", { user: env.user, enabled: 1 });
+	}
+	check(blocked && /disabled/i.test(String(blocked.message)), `a disabled user must be refused, got ${blocked ? blocked.message : "tools"}`);
+	check((await client.listTools()).tools.length === tools.length, "re-enabling the user should restore access (positive control)");
 	await client.close();
 
 	// ---- the console provisions the client Claude uses (Administrator)

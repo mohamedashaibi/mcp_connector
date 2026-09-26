@@ -149,6 +149,22 @@ def endpoint():
 		)
 	if not settings.enabled:
 		return _error(403, request_id, ACCESS_DENIED, "The MCP server is disabled on this site")
+	# Frappe refuses disabled users at password and API-key login, but accepts their OAuth bearer
+	# tokens until revoked; a Claude connector session must end when the user is disabled.
+	if not frappe.db.get_value("User", user, "enabled"):
+		if audit_rules.should_record(settings.audit_mode, "", audit_rules.DENIED):
+			caller = _caller(user, [])
+			FrappeAuditSink().record(
+				audit_rules.AuditEntry(
+					user=user,
+					rpc_method=rpc_method,
+					status=audit_rules.DENIED,
+					error="The ERPNext user is disabled",
+					client_ip=caller.client_ip,
+					user_agent=caller.user_agent,
+				)
+			)
+		return _error(403, request_id, ACCESS_DENIED, f"The ERPNext user {user} is disabled")
 	if not within_rate_limit(user, settings.rate_limit_per_minute):
 		return _error(429, request_id, RATE_LIMITED, "Rate limit exceeded; retry in a minute", {"Retry-After": "60"})
 

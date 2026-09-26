@@ -229,8 +229,15 @@ connector runs. Access tokens last an hour; Claude refreshes them on its own. Th
 only Claude's callbacks, `https://claude.ai/api/mcp/auth_callback` and
 `https://claude.com/api/mcp/auth_callback`.
 
-To cut someone off, revoke their token in *OAuth Bearer Token* or disable the user. Removing them
-from every profile takes their tools away even while their token is valid.
+Signing in happens once. Claude keeps an access token (one hour) and a refresh token and renews
+access by itself, so people do not need to stay logged in to ERPNext: logging out or closing the
+browser does not disconnect Claude. The connection lasts until one of these happens:
+
+- the person disconnects the connector in Claude, or removes it on ERPNext's `/third_party_apps` page;
+- you set their *OAuth Bearer Token* to Revoked;
+- you disable the ERPNext user (Frappe itself keeps accepting a disabled user's OAuth tokens, so the
+  connector refuses disabled users on its own);
+- you take them out of every profile, which removes their tools at once, or pause the MCP server.
 
 ### 3.2 API key clients
 

@@ -188,3 +188,10 @@ def expire_oauth_tokens(user):
 		frappe.db.set_value("OAuth Bearer Token", name, "expiration_time", frappe.utils.add_to_date(None, minutes=-5))
 	frappe.db.commit()
 	return {"expired": True}
+
+
+def set_user_enabled(user, enabled):
+	frappe.only_for("System Manager")
+	frappe.db.set_value("User", user, "enabled", int(enabled))
+	frappe.db.commit()
+	return {"enabled": int(enabled)}
