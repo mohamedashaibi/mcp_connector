@@ -48,6 +48,16 @@ for (const [inReadme, inConsole] of [
 	need(console_js.includes(inConsole), `console snippets lack ${inConsole}`);
 }
 
+// Claude connector link: callbacks and the in-Claude steps match the code and the console.
+const callbacks = [...(read("mcp_connector/domain/oauth.py").match(/CLAUDE_REDIRECT_URIS = \(([^)]*)\)/) || ["", ""])[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+need(callbacks.length === 2, `expected 2 Claude callback URLs in domain/oauth.py, found ${callbacks.length}`);
+for (const url of callbacks) need(readme.includes(url), `README does not list the Claude callback ${url}`);
+for (const step of ["Customize → Connectors", "Add custom connector", "Advanced settings", "Organization settings → Connectors → Add → Custom → Web"]) {
+	need(readme.includes(step), `README Claude connector steps lack "${step}"`);
+	need(console_js.includes(step), `console Claude connector steps lack "${step}"`);
+}
+need(readme.includes("/.well-known/oauth-authorization-server"), "README does not explain OAuth discovery");
+
 if (failures.length) {
 	console.error(`docs gate failed:\n- ${failures.join("\n- ")}`);
 	process.exit(1);

@@ -223,6 +223,7 @@ async function shoot(page, name) {
 	}
 	// Positive control for the check itself: the dev bench serves plain HTTP, which Claude refuses.
 	check((await page.locator('.mcpc-discovery li.is-bad[data-check="https"]').count()) === 1, "discovery check should flag plain HTTP");
+	await page.evaluate(() => window.scrollTo(0, 0)); // keep the sticky navbar out of the full-page shot
 	await shoot(page, "light-desktop-connect-claude");
 
 	// API key clients: snippets switch per client.

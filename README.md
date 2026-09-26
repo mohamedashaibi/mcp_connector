@@ -189,7 +189,52 @@ sidebar entry, and granting them role permissions on these DocTypes has no effec
 
 ## 3. Connect an AI client
 
-*Console → Connect* generates the configuration for you. Manually:
+There are two ways in, and both run every request as a real ERPNext user:
+
+- **Claude connector link** (claude.ai, Claude Desktop, Claude mobile): paste the endpoint URL into
+  Claude's *Add custom connector*. Each person signs in with their own ERPNext account, so each
+  gets exactly their own profile.
+- **API key** (Claude Code, Cursor, VS Code, scripts): the tool signs in as one integration user.
+
+### 3.1 Claude connector link
+
+Claude's custom connectors sign people in with OAuth. The connector uses ERPNext's own OAuth
+server for that, so there is nothing extra to run.
+
+Before you start:
+
+- Claude connects from Anthropic's servers, so the site must be reachable over **public HTTPS**.
+- ERPNext must announce the same address people use: set it once with
+  `bench --site erp.example.com set-config host_name https://erp.example.com`.
+- The web server must pass `/.well-known/` to ERPNext. A standard bench nginx configuration does.
+
+Then:
+
+1. In ERPNext, open *Console → Connect → Claude connector link* and choose **Create client for
+   Claude**. Copy the client ID and client secret. **Run check** confirms Claude can discover the
+   sign-in documents through your address.
+2. In Claude, open *Customize → Connectors*, choose **+**, then **Add custom connector**. On Team and
+   Enterprise plans an owner does this in *Organization settings → Connectors → Add → Custom → Web*.
+   - URL: `https://erp.example.com/api/method/mcp_connector.api.mcp.endpoint`
+   - **Advanced settings**: paste the OAuth Client ID and OAuth Client Secret from step 1.
+3. Each person chooses **Connect**, signs in to ERPNext and chooses **Allow**. Someone no profile
+   covers gets no tools (the endpoint answers 403).
+
+How it works: a request without credentials gets `401` with
+`WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/api/method/mcp_connector.api.mcp.endpoint"`.
+Claude reads that document and `/.well-known/oauth-authorization-server`, runs the
+authorization-code flow with PKCE (S256) against Frappe's `frappe.integrations.oauth2.authorize` and
+`get_token`, and then sends `Authorization: Bearer <token>`, which Frappe validates before the
+connector runs. Access tokens last an hour; Claude refreshes them on its own. The client accepts
+only Claude's callbacks, `https://claude.ai/api/mcp/auth_callback` and
+`https://claude.com/api/mcp/auth_callback`.
+
+To cut someone off, revoke their token in *OAuth Bearer Token* or disable the user. Removing them
+from every profile takes their tools away even while their token is valid.
+
+### 3.2 API key clients
+
+*Console → Connect → API key* generates the configuration for you. Manually:
 
 1. Generate API keys for the integration user (*Console → Connect → Generate API key*). Keep the
    secret safe; it is shown once.
@@ -341,6 +386,10 @@ inside your method — validate what it does. Generic CRUD and auth methods (`fr
 
 - Every request is authenticated by Frappe itself (API key/secret, OAuth bearer token, or a desk
   session with CSRF token) and executes as that user.
+- **Claude connector sign-in** is protected by PKCE, by the client accepting only Claude's callback
+  URLs, and by each person's own ERPNext login and consent. Frappe's token endpoint does not check
+  the client secret, so treat the secret as an identifier, not as a barrier. Like API keys, OAuth
+  tokens can also reach ERPNext's regular REST API as that person.
 - **Profiles govern what the AI does over MCP, not what the key can do elsewhere.** Whoever holds the
   API key could call ERPNext's regular REST API directly with that user's full ERPNext permissions.
   Treat the key like the user's password and give the integration user only the ERPNext roles the AI
@@ -369,6 +418,9 @@ bench --site erp.example.com migrate
 sudo supervisorctl restart all
 ```
 
+`migrate` also clears the cached app hooks. If `/.well-known/oauth-protected-resource/…` shows
+ERPNext's "Not Found" page after an update, run `bench --site erp.example.com clear-cache`.
+
 **Moving a site from v14 to v15.** Nothing app-specific: the same `main` branch runs on both, so
 upgrade Frappe/ERPNext as usual and `migrate`; profiles, actions and logs carry over. If you
 expose API Server Scripts as custom actions, re-enable them bench-wide afterwards
@@ -385,7 +437,10 @@ deleted with the app's DocTypes), then `bench remove-app mcp_connector`.
   resources or prompts (tools cover the use case).
 - JSON-RPC batch arrays and malformed JSON bodies are rejected by Frappe's request parser before
   the app sees them, so they return Frappe's error format instead of a JSON-RPC error.
-- MCP's OAuth authorization flow is not implemented; clients authenticate with ERPNext API keys.
+- No dynamic client registration: create the Claude client in the console and paste its ID and
+  secret into Claude's *Advanced settings*. Other OAuth MCP clients need their own OAuth Client with
+  their callback URL.
+- OAuth tokens are ERPNext user tokens, not bound to the MCP endpoint as their only audience.
 - When one user matches several profiles with *different* record scopes on the same DocType,
   listing merges the scoped queries in memory and can page only within the first 5,000 rows (add
   filters to reach further); the merged order emulates MariaDB's case-insensitive collation.

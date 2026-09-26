@@ -2225,7 +2225,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 						client.signed_in_users
 							? __("{0} signed in through Claude so far.", [plural(client.signed_in_users, __("person"), __("people"))])
 							: __("Nobody has signed in through Claude yet.")
-					)} <a href="/app/oauth-client/${encodeURIComponent(client.name)}">${esc(__("Manage in ERPNext"))}</a></p>`
+					)} <a class="mcpc-linkbtn" href="/app/oauth-client/${encodeURIComponent(client.name)}">${esc(__("Manage in ERPNext"))}</a></p>`
 				);
 			}
 		}
