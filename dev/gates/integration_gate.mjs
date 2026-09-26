@@ -1,5 +1,6 @@
-// Gate G4: run the Frappe v14 integration suite on a dedicated test site
-// (keeps the dev site clean), plus the unit suite under the bench's Python 3.10.
+// Gate G4: run the Frappe integration suite on a dedicated test site (keeps the dev site
+// clean), plus the unit suite under the bench's own Python. `--bench v14|v15` picks the bench;
+// up() fails unless it really runs that Frappe major version.
 import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +13,7 @@ const modules = readdirSync(join(here, "..", "..", "mcp_connector", "tests", "in
 	.filter((f) => f.startsWith("test_") && f.endsWith(".py"))
 	.map((f) => `mcp_connector.tests.integration.${f.slice(0, -3)}`);
 
-await up();
+const { frappe: frappeVersion, python: pythonVersion } = await up();
 benchShell(`
 	set -e
 	if [ ! -d sites/${TEST_SITE} ]; then
@@ -45,11 +46,11 @@ const unit = benchShell(
 );
 const unitOut = unit.stdout + unit.stderr;
 const unitOk = unit.status === 0 && /\nOK/.test(unitOut);
-console.log(`unit suite under bench Python 3.10: ${(unitOut.match(/Ran (\d+) tests?/) || [])[1] || 0} test(s) ${unitOk ? "OK" : "FAILED"}`);
+console.log(`unit suite under bench Python ${pythonVersion}: ${(unitOut.match(/Ran (\d+) tests?/) || [])[1] || 0} test(s) ${unitOk ? "OK" : "FAILED"}`);
 if (!unitOk) console.log(unitOut.slice(-4000));
 
 if (problems.length || !unitOk || ran < MIN_INTEGRATION_TESTS) {
 	console.error(`integration gate failed: ran=${ran} (min ${MIN_INTEGRATION_TESTS}), failing modules: ${problems.join(", ") || "none"}, unit ok=${unitOk}`);
 	process.exit(1);
 }
-console.log(`INTEGRATION GATE PASSED (${ran} integration tests on Frappe v14)`);
+console.log(`INTEGRATION GATE PASSED on Frappe ${frappeVersion} (${ran} integration tests, Python ${pythonVersion})`);

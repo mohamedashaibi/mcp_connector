@@ -1,4 +1,4 @@
-// Gate G3: a fresh Frappe v14 site installs the app and ends up with every artifact.
+// Gate G3: a fresh Frappe site (--bench v14|v15) installs the app and ends up with every artifact.
 import { benchShell, up } from "../bench.mjs";
 
 const SITE = "mcpinstall.localhost";
@@ -19,7 +19,7 @@ const STANDARD = [
 	"list_reports", "describe_report", "run_report",
 ];
 
-await up();
+const { frappe: FRAPPE_VERSION } = await up();
 const failures = [];
 // Arguments are constants defined in this file, never external input.
 const siteQuery = (method, kwargs) => {
@@ -71,4 +71,4 @@ if (failures.length) {
 	console.error(`install gate failed:\n- ${failures.join("\n- ")}`);
 	process.exit(1);
 }
-console.log(`INSTALL GATE PASSED (${DOCTYPES.length} doctypes, page, workspace, Administrator-only access, ${STANDARD.length} standard actions; migrate idempotent)`);
+console.log(`INSTALL GATE PASSED on Frappe ${FRAPPE_VERSION} (${DOCTYPES.length} doctypes, page, workspace, Administrator-only access, ${STANDARD.length} standard actions; migrate idempotent)`);

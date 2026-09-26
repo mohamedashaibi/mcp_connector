@@ -46,7 +46,7 @@ async function connect(auth) {
 const payload = (result) => (result.isError ? null : JSON.parse(result.content[0].text));
 const enumOf = (tool, prop = "doctype") => (tool && tool.inputSchema.properties[prop] ? tool.inputSchema.properties[prop].enum : null);
 
-await up();
+const { frappe: FRAPPE_VERSION } = await up();
 const env = execute("mcp_connector.tests.e2e_setup.setup");
 const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "raw", version: "1" } } };
 
@@ -145,4 +145,4 @@ if (failures.length) {
 	console.error(`MCP e2e gate failed (${failures.length}/${checks}):\n- ${failures.join("\n- ")}`);
 	process.exit(1);
 }
-console.log(`MCP E2E GATE PASSED (${checks} checks via @modelcontextprotocol/sdk)`);
+console.log(`MCP E2E GATE PASSED on Frappe ${FRAPPE_VERSION} (${checks} checks via @modelcontextprotocol/sdk)`);

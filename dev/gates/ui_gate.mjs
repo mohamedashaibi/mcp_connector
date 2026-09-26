@@ -1,14 +1,14 @@
-// Gate G6: the MCP Console works in a real browser against the v14 bench.
+// Gate G6: the MCP Console works in a real browser against the chosen bench (--bench v14|v15).
 // Builds a profile entirely through the UI, checks what the server stored,
 // deletes it through the UI, and writes light/dark/narrow screenshots.
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { BASE_URL, execute, up } from "../bench.mjs";
+import { BASE_URL, BENCH_NAME, execute, up } from "../bench.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SHOTS = join(here, "..", "artifacts", "ui");
+const SHOTS = join(here, "..", "artifacts", BENCH_NAME === "v14" ? "ui" : `ui-${BENCH_NAME}`);
 mkdirSync(SHOTS, { recursive: true });
 const PROFILE = `UI Gate ${Date.now().toString(36)}`;
 const failures = [];
@@ -16,7 +16,7 @@ const check = (ok, message) => {
 	if (!ok) failures.push(message);
 };
 
-await up();
+const { frappe: FRAPPE_VERSION } = await up();
 const browser = await chromium.launch();
 
 async function session({ theme = "Light", width = 1440, usr = "Administrator", pwd = "admin", console_page = true } = {}) {
@@ -25,7 +25,9 @@ async function session({ theme = "Light", width = 1440, usr = "Administrator", p
 	const errors = [];
 	page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
 	page.on("console", (m) => {
-		if (m.type() === "error" && !/favicon|Failed to load resource/.test(m.text())) errors.push(`console: ${m.text()}`);
+		// The dev bench runs no socket.io service; v15's desk logs each failed reconnect.
+		const noise = /favicon|Failed to load resource|Error connecting to socket\.io/;
+		if (m.type() === "error" && !noise.test(m.text())) errors.push(`console: ${m.text()}`);
 	});
 	const login = await page.request.post(`${BASE_URL}/api/method/login`, { form: { usr, pwd } });
 	check(login.ok(), `login failed for ${usr}`);
@@ -50,7 +52,8 @@ async function pick_link(scope, value) {
 	const input = scope.locator("input").first();
 	await input.click();
 	await input.fill(value);
-	const option = scope.page().locator(".awesomplete ul[role=listbox]:visible li", { hasText: value }).first();
+	// v14 renders suggestions as <li>, v15 as <div role="option">.
+	const option = scope.page().locator(".awesomplete ul[role=listbox]:visible :is(li, [role=option])", { hasText: value }).first();
 	await option.waitFor({ timeout: 10000 });
 	await option.click();
 	await scope.page().waitForTimeout(400);
@@ -82,6 +85,14 @@ async function shoot(page, name) {
 		await nav(page, section);
 		check((await page.locator(selector).count()) > 0, `section ${section} did not render ${selector}`);
 		check(page.url().includes(`/app/mcp-console/${section}`), `section ${section} did not deep-link (url ${page.url()})`);
+		if (section === "overview" && (await api(page, "dashboard", { hours: 24 })).total > 0) {
+			// frappe-charts draws empty axes first and animates the bars in afterwards.
+			const drawn = await page
+				.waitForFunction(() => [...document.querySelectorAll(".mcpc-chart svg rect")].some((r) => +r.getAttribute("height") > 0), null, { timeout: 5000 })
+				.then(() => true, () => false);
+			check(drawn, "the activity chart drew no bars although the dashboard has calls");
+			await page.waitForTimeout(400); // let the grow animation finish before the screenshot
+		}
 		await shoot(page, `light-desktop-${section}`);
 	}
 
@@ -284,4 +295,4 @@ if (failures.length) {
 	console.error(`UI gate failed:\n- ${failures.join("\n- ")}`);
 	process.exit(1);
 }
-console.log(`UI GATE PASSED (screenshots in ${SHOTS})`);
+console.log(`UI GATE PASSED on Frappe ${FRAPPE_VERSION} (screenshots in ${SHOTS})`);

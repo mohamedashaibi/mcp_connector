@@ -55,23 +55,47 @@ class TestInstallation(McpTestCase):
 		self.assertTrue(frappe.db.exists("MCP Audit Log", {"tool": "new_entry"}))
 
 	def test_failed_work_drops_queued_side_effects(self):
-		from mcp_connector.infrastructure.uow import FrappeUnitOfWork
+		# Real Frappe APIs, so this holds on v14 (flag/local lists) and v15 (db commit callbacks).
+		from mcp_connector.infrastructure.uow import FrappeUnitOfWork, _snapshot
 
-		frappe.flags.enqueue_after_commit = [{"job": "before"}]
-		frappe.local.realtime_log = []
+		def pending():
+			return [length for *_, length in _snapshot()]
+
+		hook = frappe.get_doc(
+			{
+				"doctype": "Webhook",
+				"webhook_doctype": "ToDo",
+				"webhook_docevent": "after_insert",
+				"request_url": "https://example.invalid/mcp-probe",
+				"request_structure": "Form URL-Encoded",
+			}
+		).insert(ignore_permissions=True, set_name="MCP Rollback Probe")  # v15 names webhooks by prompt
+
+		def forget_hook():
+			frappe.delete_doc("Webhook", hook.name, ignore_permissions=True, force=True)
+			frappe.cache().delete_value("webhooks")
+			frappe.flags.webhooks = None
+
+		self.addCleanup(forget_hook)
+		frappe.flags.webhooks = None  # run_webhooks caches the list per request
+		frappe.enqueue("frappe.ping", enqueue_after_commit=True)  # queued before: must survive
+		before = pending()
+		during = {}
 
 		def work():
 			frappe.get_doc({"doctype": "ToDo", "description": "rolled back"}).insert()
-			frappe.flags.enqueue_after_commit.append({"job": "webhook for a doc that will not exist"})
-			frappe.local.realtime_log.append(["list_update", {}, None, None, None])
+			frappe.enqueue("frappe.ping", enqueue_after_commit=True)
+			frappe.publish_realtime("mcp_probe", {}, after_commit=True)
+			during.update(pending=pending(), webhooks=len(getattr(frappe.local, "_webhook_queue", None) or []))
 			raise RuntimeError("scope check failed")
 
 		with self.assertRaises(RuntimeError):
 			FrappeUnitOfWork().atomic(work)
-		self.assertEqual(frappe.flags.enqueue_after_commit, [{"job": "before"}])
-		self.assertEqual(frappe.local.realtime_log, [])
+		self.assertEqual(during["webhooks"], 1, "positive control: the insert queued the webhook")
+		self.assertNotEqual(during["pending"], before, "positive control: the work queued commit-time work")
+		self.assertEqual(pending(), before)
+		self.assertFalse(getattr(frappe.local, "_webhook_queue", None))
 		self.assertFalse(frappe.db.exists("ToDo", {"description": "rolled back"}))
-		frappe.flags.enqueue_after_commit = []
 
 	def test_policy_cache_follows_committed_data_without_explicit_clear(self):
 		self.make_profile("Stamp Probe", users=["Administrator"])

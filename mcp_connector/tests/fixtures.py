@@ -214,6 +214,14 @@ def ensure_builder_report():
 	)
 
 
+def server_scripts_enabled() -> bool:
+	try:
+		from frappe.utils.safe_exec import is_safe_exec_enabled  # v15: bench-wide setting only
+	except ImportError:
+		return bool(frappe.conf.get("server_script_enabled"))  # v14: site or bench config
+	return is_safe_exec_enabled()
+
+
 def ensure_server_script():
 	_ensure(
 		"Server Script",
@@ -236,7 +244,7 @@ def ensure_all():
 	ensure_workflow()
 	ensure_report()
 	ensure_builder_report()
-	if frappe.conf.get("server_script_enabled"):
+	if server_scripts_enabled():
 		ensure_server_script()
 	frappe.db.commit()
 

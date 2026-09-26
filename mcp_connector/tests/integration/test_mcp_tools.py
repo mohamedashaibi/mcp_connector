@@ -1,4 +1,4 @@
-"""Every MCP tool against a real Frappe v14 site, as real users with real roles."""
+"""Every MCP tool against a real Frappe site, as real users with real roles."""
 
 import frappe
 
@@ -19,7 +19,7 @@ class TestMcpTools(McpTestCase):
 			{"doctype": "MCP Action", "tool_name": "server_ping", "action_type": "Custom", "description": "Ping", "method": "frappe.ping", "read_only_hint": 1}
 		).insert()
 		custom = ["server_ping"]
-		if frappe.conf.get("server_script_enabled"):
+		if F.server_scripts_enabled():
 			frappe.get_doc(
 				{
 					"doctype": "MCP Action",
@@ -253,7 +253,7 @@ class TestMcpTools(McpTestCase):
 	# -- custom actions, controls and audit ----------------------------------
 	def test_custom_actions(self):
 		self.assertEqual(self.call(F.SALES_USER, "server_ping").data["result"], "pong")
-		if frappe.conf.get("server_script_enabled"):
+		if F.server_scripts_enabled():
 			echo = self.call(F.SALES_USER, "echo_text", text="hello").data["result"]
 			self.assertEqual(echo, {"echo": "hello", "user": F.SALES_USER})
 			self.assertTrue(self.call(F.SALES_USER, "echo_text").error)

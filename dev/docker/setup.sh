@@ -24,6 +24,7 @@ if [ "$(bench --site "$SITE" execute frappe.db.get_single_value --args '["System
 fi
 bench --site "$SITE" set-config allow_tests true >/dev/null
 bench --site "$SITE" set-config server_script_enabled true >/dev/null
+bench set-config -g server_script_enabled 1 >/dev/null  # v15 reads it from common_site_config only
 bench --site "$SITE" set-config developer_mode 0 >/dev/null
 echo "$SITE" > sites/currentsite.txt
 echo "SETUP DONE $SITE"

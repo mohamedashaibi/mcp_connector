@@ -1,8 +1,7 @@
-# Disposable Frappe/ERPNext v14 bench for developing and verifying the app.
-#   node dev/bench.mjs up      -> start, create site mcp.localhost, install the app, serve on :8014
-#   node dev/bench.mjs down    -> stop and delete everything
-name: mcp-connector-v14
-
+# Disposable Frappe/ERPNext bench for developing and verifying the app.
+#   node dev/bench.mjs up [--bench v14|v15]    -> start, create site mcp.localhost, install the app
+#   node dev/bench.mjs down [--bench v14|v15]  -> stop and delete everything
+# v14 serves on :8014 and v15 on :8015 (image and port are passed in by dev/bench.mjs).
 services:
   db:
     image: mariadb:10.6
@@ -22,7 +21,7 @@ services:
     image: redis:6.2-alpine
 
   backend:
-    image: frappe/erpnext:v14.92.12
+    image: ${ERPNEXT_IMAGE:-frappe/erpnext:v14.92.12}
     depends_on:
       db:
         condition: service_healthy
@@ -32,7 +31,7 @@ services:
       - ../..:/home/frappe/frappe-bench/apps/mcp_connector
       - sites:/home/frappe/frappe-bench/sites
     ports:
-      - "8014:8000"
+      - "${MCP_BENCH_PORT:-8014}:8000"
     command: ["sleep", "infinity"]
 
 volumes:

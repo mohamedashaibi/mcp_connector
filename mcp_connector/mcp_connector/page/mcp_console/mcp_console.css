@@ -10,7 +10,10 @@
 	--c-line: var(--border-color);
 	--c-hover: var(--fg-hover-color, var(--control-bg));
 	--c-control: var(--control-bg);
-	--c-accent: var(--primary);
+	/* v15 keeps --primary near-black in both themes and flips --btn-primary / --neutral instead;
+	   v14 has neither, so these fall back to its blue --primary with white on top. */
+	--c-accent: var(--btn-primary, var(--primary));
+	--c-on-accent: var(--neutral, #fff);
 	--c-ok: var(--text-on-green);
 	--c-ok-bg: var(--bg-green);
 	--c-warn: var(--text-on-yellow);
@@ -19,10 +22,12 @@
 	--c-bad-bg: var(--bg-red);
 	--c-info: var(--text-on-blue);
 	--c-info-bg: var(--bg-blue);
-	/* Status colours for text drawn directly on the surface (the --c-* above pair with their -bg). */
-	--c-ok-ink: var(--dark-green-700, #286840);
-	--c-warn-ink: var(--yellow-700, #975a16);
-	--c-bad-ink: var(--red-600, #c53030);
+	/* Status colours for text drawn directly on the surface (the --c-* above pair with their -bg).
+	   v14 has a --dark-green-* scale and v15 a retuned --green-* one; each pick clears 4.5:1 on
+	   white in both (v15's --yellow-700 does not, hence 800). */
+	--c-ok-ink: var(--dark-green-700, var(--green-800));
+	--c-warn-ink: var(--yellow-800);
+	--c-bad-ink: var(--red-600);
 	--f-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
 	--ease-snap: cubic-bezier(0.16, 1, 0.3, 1);
 	--ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
@@ -36,9 +41,9 @@
 }
 
 [data-theme="dark"] .mcpc {
-	--c-ok-ink: var(--green-300, #bce39b);
-	--c-warn-ink: var(--yellow-300, #f6c35e);
-	--c-bad-ink: var(--red-300, #fca4a4);
+	--c-ok-ink: var(--green-300);
+	--c-warn-ink: var(--yellow-300);
+	--c-bad-ink: var(--red-300);
 }
 
 .mcpc [hidden] {
@@ -321,7 +326,7 @@
 }
 
 .mcpc-switch[aria-checked="true"] .mcpc-switch__thumb {
-	background: #fff;
+	background: var(--c-on-accent);
 	transform: translateX(16px);
 }
 
@@ -578,7 +583,7 @@
 }
 
 .mcpc-dot--ok {
-	background: var(--dark-green-500, #2f9d58);
+	background: var(--dark-green-500, var(--green-600));
 	box-shadow: 0 0 0 6px var(--c-ok-bg);
 }
 
@@ -977,7 +982,7 @@
 	border: 1.5px solid var(--c-muted);
 	border-radius: 6px;
 	background: var(--c-surface);
-	color: #fff;
+	color: var(--c-on-accent);
 	cursor: pointer;
 	transition: background-color 160ms var(--ease-snap), border-color 160ms var(--ease-snap);
 }
@@ -1431,7 +1436,7 @@
 	height: 16px;
 	border: 1.5px solid var(--c-muted);
 	border-radius: 4px;
-	color: #fff;
+	color: var(--c-on-accent);
 }
 
 [aria-pressed="true"] > .mcpc-act__box,

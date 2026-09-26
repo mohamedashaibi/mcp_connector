@@ -1,4 +1,4 @@
-# MCP Connector for ERPNext / Frappe v14
+# MCP Connector for ERPNext / Frappe v14 and v15
 
 Connect AI assistants (Claude, Cursor, VS Code Copilot, any MCP client) to ERPNext through the
 [Model Context Protocol](https://modelcontextprotocol.io), with access you control down to the
@@ -11,7 +11,9 @@ role, action type, action, DocType, field, record and report.
 - **MCP Console** — a desk page to build profiles, inspect what any user's AI can do, watch activity, and generate ready-to-paste client configuration.
 - **Audit trail** of every tool call, with secrets masked.
 
-Tested on Frappe 14.100.0 / ERPNext v14.92.12 (Python 3.10). The app does not depend on ERPNext; it works on any Frappe v14 site.
+One codebase for both versions, tested on Frappe 14.100.0 / ERPNext v14.92.12 (Python 3.10) and
+Frappe 15.121.1 / ERPNext v15.121.4 (Python 3.11). The app does not depend on ERPNext; it works on
+any Frappe v14 or v15 site.
 
 ---
 
@@ -33,7 +35,7 @@ Tested on Frappe 14.100.0 / ERPNext v14.92.12 (Python 3.10). The app does not de
 ## 1. Install on your server
 
 You need shell access to the server as the user that owns the bench (usually `frappe`), and the
-bench must be on Frappe **v14**. Replace `erp.example.com` with your site name
+bench must be on Frappe **v14** or **v15**. Replace `erp.example.com` with your site name
 (`ls ~/frappe-bench/sites` shows it).
 
 ### 1.1 Give the server read access to this private repository
@@ -113,19 +115,29 @@ For later updates you will supply the token again (or switch to a deploy key).
 - **Reverse proxy timeouts.** Large reports can take a while. If you see 502/504 on `run_report`,
   raise `proxy_read_timeout` in the site's nginx config and the gunicorn timeout
   (`bench config http_timeout 180 && bench setup supervisor && sudo supervisorctl reload`).
-- **Server scripts** are only needed if you expose API Server Scripts as custom actions:
-  `bench --site erp.example.com set-config server_script_enabled true`.
+- **Server scripts** are only needed if you expose API Server Scripts as custom actions.
+  On v14: `bench --site erp.example.com set-config server_script_enabled true`. On v15 the
+  setting is bench-wide and the site-level one is ignored: `bench set-config -g server_script_enabled 1`.
 - **Firewall / exposure.** The endpoint lives at `/api/method/mcp_connector.api.mcp.endpoint` on
   your existing site; nothing new to open. Restrict who can reach the site as you would for the ERPNext API.
 
 ### 1.5 Docker (frappe_docker) installs
 
 With the official `frappe_docker` setup you bake apps into a custom image. Add this repository to
-`apps.json` (a private repo needs the token in the URL, or build with an SSH secret):
+`apps.json` (a private repo needs the token in the URL, or build with an SSH secret). The app's
+`main` branch serves both versions; only the ERPNext branch and the build arguments change:
+
+| | ERPNext branch | `FRAPPE_BRANCH` | `PYTHON_VERSION` | `NODE_VERSION` |
+| --- | --- | --- | --- | --- |
+| v14 | `version-14` | `version-14` | `3.10.13` | `16.20.2` |
+| v15 | `version-15` | `version-15` | `3.11.16` | `22.23.3` |
+
+These are the versions inside the official `frappe/erpnext` v14.92.12 and v15.121.4 images the
+app is tested on. Example for v15:
 
 ```json
 [
-  { "url": "https://github.com/frappe/erpnext", "branch": "version-14" },
+  { "url": "https://github.com/frappe/erpnext", "branch": "version-15" },
   { "url": "https://<TOKEN>@github.com/mohamedashaibi/mcp_connector.git", "branch": "main" }
 ]
 ```
@@ -134,15 +146,15 @@ With the official `frappe_docker` setup you bake apps into a custom image. Add t
 export APPS_JSON_BASE64=$(base64 -w 0 apps.json)
 docker build \
   --build-arg=FRAPPE_PATH=https://github.com/frappe/frappe \
-  --build-arg=FRAPPE_BRANCH=version-14 \
-  --build-arg=PYTHON_VERSION=3.10.13 \
-  --build-arg=NODE_VERSION=16.20.2 \
+  --build-arg=FRAPPE_BRANCH=version-15 \
+  --build-arg=PYTHON_VERSION=3.11.16 \
+  --build-arg=NODE_VERSION=22.23.3 \
   --build-arg=APPS_JSON_BASE64=$APPS_JSON_BASE64 \
-  --tag=my-erpnext:14-mcp \
+  --tag=my-erpnext:15-mcp \
   --file=images/custom/Containerfile .
 ```
 
-Point your compose file at `my-erpnext:14-mcp`, restart the stack, then run once:
+Point your compose file at `my-erpnext:15-mcp` (or your v14 tag), restart the stack, then run once:
 
 ```bash
 docker compose exec backend bench --site erp.example.com install-app mcp_connector
@@ -357,6 +369,11 @@ bench --site erp.example.com migrate
 sudo supervisorctl restart all
 ```
 
+**Moving a site from v14 to v15.** Nothing app-specific: the same `main` branch runs on both, so
+upgrade Frappe/ERPNext as usual and `migrate`; profiles, actions and logs carry over. If you
+expose API Server Scripts as custom actions, re-enable them bench-wide afterwards
+(`bench set-config -g server_script_enabled 1`), because v15 ignores the site-level setting.
+
 To remove it: `bench --site erp.example.com uninstall-app mcp_connector` (profiles and logs are
 deleted with the app's DocTypes), then `bench remove-app mcp_connector`.
 
@@ -368,7 +385,7 @@ deleted with the app's DocTypes), then `bench remove-app mcp_connector`.
   resources or prompts (tools cover the use case).
 - JSON-RPC batch arrays and malformed JSON bodies are rejected by Frappe's request parser before
   the app sees them, so they return Frappe's error format instead of a JSON-RPC error.
-- MCP's OAuth discovery flow is not supported; use API keys (Frappe v14 has no dynamic client registration).
+- MCP's OAuth authorization flow is not implemented; clients authenticate with ERPNext API keys.
 - When one user matches several profiles with *different* record scopes on the same DocType,
   listing merges the scoped queries in memory and can page only within the first 5,000 rows (add
   filters to reach further); the merged order emulates MariaDB's case-insensitive collation.
@@ -378,18 +395,21 @@ deleted with the app's DocTypes), then `bench remove-app mcp_connector`.
 
 ## 10. Development and tests
 
-The `dev/` folder holds a disposable Frappe v14 bench (Docker) and the verification gates.
+The `dev/` folder holds disposable Frappe v14 and v15 benches (Docker) and the verification gates.
+Every bench command and Docker gate takes `--bench v14` (the default) or `--bench v15`; the two
+benches are separate compose projects, so they can run side by side.
 
 ```bash
 node dev/bench.mjs up                 # MariaDB + Redis + ERPNext v14 image, site mcp.localhost on :8014
+node dev/bench.mjs up --bench v15     # the same on the ERPNext v15 image, on :8015
 python dev/gates/unit_gate.py         # framework-free unit tests (policy engine, validators, dispatcher)
 python dev/gates/static_gate.py       # layer boundaries, Python 3.10 grammar, no string-built SQL
 node dev/gates/install_gate.mjs       # fresh install on a new site
-node dev/gates/integration_gate.mjs   # Frappe v14 integration suite
+node dev/gates/integration_gate.mjs   # Frappe integration suite (add --bench v15 for v15)
 cd dev && npm install && cd ..        # once, for the next two gates
 node dev/gates/mcp_e2e_gate.mjs       # official MCP SDK client over HTTP
 node dev/gates/ui_gate.mjs            # console in Chromium: full workflow, light/dark/narrow
-node dev/bench.mjs down               # remove everything
+node dev/bench.mjs down               # remove everything (per bench)
 ```
 
 Code layout: `mcp_connector/domain` (pure policy rules), `mcp_connector/application` (use cases

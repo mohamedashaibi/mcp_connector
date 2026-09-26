@@ -21,7 +21,10 @@ need(appName === "mcp_connector" && hooksName === appName, `app name mismatch: p
 need(readme.includes(`install-app ${appName}`), "README install-app command uses the wrong app name");
 need(/bench get-app --branch main /.test(readme), "README lacks the bench get-app step");
 need(readme.includes("mohamedashaibi/mcp_connector"), "README does not name the repository");
-need(readme.includes('frappe = ">=14.0.0,<15.0.0"') || /Frappe \*\*v14\*\*/.test(readme), "README should state the v14 requirement");
+const frappeRange = (read("pyproject.toml").match(/^frappe = "([^"]+)"/m) || [])[1];
+need(frappeRange === ">=14.0.0,<16.0.0", `pyproject should accept Frappe v14 and v15, got ${frappeRange}`);
+need(/Frappe \*\*v14\*\* or \*\*v15\*\*/.test(readme), "README should state the v14/v15 requirement");
+for (const branch of ["version-14", "version-15"]) need(readme.includes(`\`${branch}\``), `README Docker table lacks ${branch}`);
 
 const tools = [...read("mcp_connector/domain/catalog.py").matchAll(/name="([a-z_]+)"/g)].map((m) => m[1]);
 need(tools.length === 14, `expected 14 built-in tools in catalog.py, found ${tools.length}`);
