@@ -141,7 +141,8 @@ try {
 	} finally {
 		execute("mcp_connector.tests.e2e_setup.set_user_enabled", { user: env.user, enabled: 1 });
 	}
-	check(blocked && /disabled/i.test(String(blocked.message)), `a disabled user must be refused, got ${blocked ? blocked.message : "tools"}`);
+	// v14 lets the token through and the connector answers 403 "disabled"; v15 refuses it with 401 first.
+	check(blocked && /disabled|\b401\b/i.test(String(blocked.message)), `a disabled user must be refused, got ${blocked ? blocked.message : "tools"}`);
 	check((await client.listTools()).tools.length === tools.length, "re-enabling the user should restore access (positive control)");
 	await client.close();
 

@@ -26,7 +26,7 @@ from mcp_connector.domain.filters import (
 	sort_rows,
 )
 from mcp_connector.domain.policy import ActionSpec, EffectivePolicy, union_rules
-from mcp_connector.domain.protected import is_blocked_method, is_exposable, is_writable
+from mcp_connector.domain.protected import CUSTOM_FIELD, custom_field_problem, is_blocked_method, is_exposable, is_writable
 
 from .access import (
 	default_list_fields,
@@ -117,6 +117,17 @@ class DocumentTool:
 		if not accepted:
 			raise first_error or PolicyDenied(f"Your MCP access profile does not allow writing {info.name}")
 		return accepted, cleaned
+
+	def check_custom_field(self, ctx: ToolContext, info: DoctypeInfo, accepted: list, data: dict, name: str = None) -> None:
+		"""Saving a Custom Field alters a table, which commits at once: nothing can be undone
+		afterwards, so every check (the saved result on update included) runs before it."""
+		if info.name != CUSTOM_FIELD:
+			return
+		problem = custom_field_problem({**ctx.gateway.get_document(info.name, name), **data} if name else data)
+		if problem:
+			raise PolicyDenied(problem)
+		if all(g.scope for g in accepted):
+			raise PolicyDenied("Custom Field cannot be written under a record scope: the table change commits before the scope is checked")
 
 	def visible(self, ctx: ToolContext, info: DoctypeInfo, doc: dict) -> dict:
 		"""Project a written document through the Read grants whose scope contains it."""
@@ -355,6 +366,7 @@ class CreateDocumentTool(DocumentTool):
 			raise InvalidArguments(f"{doctype} is a single (settings) DocType; use update_document instead")
 		_reject_workflow_state(info, args["data"])
 		accepted, data = self.accepting(info, grants, args["data"], creating=True)
+		self.check_custom_field(ctx, info, accepted, data)
 		doc = ctx.gateway.create_document(doctype, data)
 		if not self.matching(ctx, info, doc["name"], accepted):
 			raise PolicyDenied(f"The new {doctype} would fall outside your access scope; nothing was saved")
@@ -372,6 +384,7 @@ class UpdateDocumentTool(DocumentTool):
 		_reject_workflow_state(info, args["data"])
 		covering = self.in_scope(ctx, info, name, grants)
 		accepted, data = self.accepting(info, covering, args["data"], creating=False)
+		self.check_custom_field(ctx, info, accepted, data, name)
 		doc = ctx.gateway.update_document(doctype, name, data)
 		if not self.matching(ctx, info, name, accepted):
 			raise PolicyDenied(f"This change would move {doctype} {name} outside your access scope; nothing was saved")

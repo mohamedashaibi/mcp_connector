@@ -8,7 +8,7 @@ from mcp_connector.domain.action_types import DOC_OPERATIONS, OPERATION_FIELD, R
 from mcp_connector.domain.errors import InvalidArguments
 from mcp_connector.domain.filters import STANDARD_FIELDS, check_identifier
 from mcp_connector.domain.policy import ALL_FIELDS, ONLY_LISTED, parse_field_list
-from mcp_connector.domain.protected import is_exposable, is_writable
+from mcp_connector.domain.protected import CUSTOM_FIELD, is_exposable, is_writable
 from mcp_connector.infrastructure.gateway import LAYOUT_TYPES
 from mcp_connector.infrastructure.policy_source import clear_cache, parse_fixed_filters, parse_scope
 
@@ -77,6 +77,8 @@ class MCPProfile(Document):
 			if (row.scope_filters or "").strip():
 				if meta.issingle:
 					frappe.throw(_("Scope filters are not supported on single DocType {0}").format(label))
+				if doctype == CUSTOM_FIELD and operations != [READ]:
+					frappe.throw(_("Scope filters cannot be used while {0} can be written: saving a custom field alters the table at once").format(label))
 				try:
 					conditions = parse_scope(row.scope_filters)
 				except (ValueError, InvalidArguments) as e:

@@ -22,7 +22,7 @@ from mcp_connector.domain.filters import (
 	sort_rows,
 )
 from mcp_connector.domain.jsonrpc import INVALID_PARAMS, INVALID_REQUEST, RpcError, parse_message
-from mcp_connector.domain.protected import is_blocked_method, is_exposable, is_writable
+from mcp_connector.domain.protected import custom_field_problem, is_blocked_method, is_exposable, is_writable
 from mcp_connector.domain.schema import validate_arguments, validate_input_schema
 
 ALLOWED = {"status", "grand_total", "customer", "posting_date", "name", "modified"}.__contains__
@@ -211,10 +211,36 @@ class TestProtected(unittest.TestCase):
 			self.assertFalse(is_exposable(doctype), doctype)
 
 	def test_code_and_permission_doctypes_are_read_only(self):
-		for doctype in ("Server Script", "User", "Role", "DocType", "Custom Field", "Report", "Print Format"):
+		for doctype in ("Server Script", "User", "Role", "DocType", "Property Setter", "Report", "Print Format"):
 			self.assertTrue(is_exposable(doctype))
 			self.assertFalse(is_writable(doctype), doctype)
 		self.assertTrue(is_writable("Sales Invoice"))
+		self.assertTrue(is_writable("Custom Field"))
+
+	def test_custom_field_guard(self):
+		base = {"dt": "Customer", "label": "Region", "fieldtype": "Data", "insert_after": "customer_name"}
+		self.assertIsNone(custom_field_problem(base))
+		self.assertIsNone(custom_field_problem({**base, "fieldtype": "Link", "options": "Territory", "depends_on": "customer_name"}))
+		refused = [
+			{"dt": "User"},
+			{"dt": " mcp settings "},  # Frappe would fix the case and ignore the padding
+			{"dt": "Server Script"},
+			{"fieldtype": "HTML", "options": "<img src=x onerror=alert(1)>"},
+			{"fieldtype": "html editor"},
+			{"fieldtype": "Button"},
+			{"fieldtype": "Link", "options": "OAuth Bearer Token"},
+			{"fieldtype": "Table", "options": "mcp profile role"},
+			{"fetch_from": "customer.tax_id"},
+			{"depends_on": "eval:frappe.call('x')"},
+			{"mandatory_depends_on": "doc.a && doc.b"},
+			{"collapsible_depends_on": "fn:boom"},
+			{"default": "eval:1"},
+			{"ignore_xss_filter": 1},
+			{"ignore_user_permissions": 1},
+			{"is_virtual": 1, "options": "frappe.db.sql('...')"},
+		]
+		for extra in refused:
+			self.assertIsNotNone(custom_field_problem({**base, **extra}), extra)
 
 	def test_blocked_methods(self):
 		for method in ("frappe.client.get_list", "frappe.client", "frappe.desk.form.save.savedocs", "mcp_connector.api.mcp.endpoint"):

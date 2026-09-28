@@ -647,5 +647,57 @@ class TestReviewRegressions(unittest.TestCase):
 		self.assertFalse(h.call("run_report", report_name="Invoice Builder", filters={"customer": "CUST-1"})["isError"])
 
 
+class TestCustomFields(unittest.TestCase):
+	"""Adding a Custom Field alters a table and commits at once, so every refusal must come before the write."""
+
+	FIELD = {"dt": "Customer", "label": "Region", "fieldtype": "Data", "insert_after": "customer_name"}
+
+	def harness(self, scope=()):
+		p = _p("F", {READ, CREATE, UPDATE}, {"create_document", "update_document"}, [DoctypeRule("Custom Field", frozenset({READ, CREATE, UPDATE}), scope=scope)])
+		h = Harness(profiles=(p,), user="u", roles=())
+		h.gateway.add_doctype(
+			"Custom Field",
+			[field(f) for f in ("dt", "label", "fieldname", "insert_after", "options", "fetch_from", "default")]
+			+ [field("fieldtype", "Select"), field("depends_on", "Code"), field("ignore_xss_filter", "Check"), field("is_virtual", "Check")],
+		)
+		h.gateway.add_doc("Custom Field", "Customer-legacy_html", dt="Customer", fieldtype="HTML", options="<b>hi</b>")
+		return h
+
+	def refuse_writes(self, h):
+		def fail(*args):
+			raise AssertionError("wrote before every check passed")
+
+		h.gateway.create_document = h.gateway.update_document = fail
+
+	def test_add_custom_field(self):
+		h = self.harness()
+		result = h.call("create_document", doctype="Custom Field", data=self.FIELD)
+		self.assertFalse(result["isError"], result["text"])
+		self.assertEqual(h.gateway.docs["Custom Field"][result["data"]["name"]]["label"], "Region")
+		self.assertIn("create_document", h.tools())
+
+	def test_unsafe_settings_are_refused_before_writing(self):
+		h = self.harness()
+		self.refuse_writes(h)
+		for extra in ({"dt": "User"}, {"fieldtype": "HTML", "options": "<script>x</script>"}, {"depends_on": "eval:1"}, {"ignore_xss_filter": 1}):
+			result = h.call("create_document", doctype="Custom Field", data={**self.FIELD, **extra})
+			self.assertTrue(result["isError"], extra)
+			self.assertEqual(h.audit.entries[-1].status, DENIED)
+
+	def test_update_is_checked_against_the_saved_field(self):
+		h = self.harness()
+		self.refuse_writes(h)
+		result = h.call("update_document", doctype="Custom Field", name="Customer-legacy_html", data={"options": "<img src=x onerror=alert(1)>"})
+		self.assertTrue(result["isError"])
+		self.assertIn("HTML fields", result["text"])
+
+	def test_scoped_grant_is_refused_before_writing(self):
+		h = self.harness(scope=(("dt", "=", "Customer"),))
+		self.refuse_writes(h)
+		result = h.call("create_document", doctype="Custom Field", data=self.FIELD)
+		self.assertTrue(result["isError"])
+		self.assertIn("record scope", result["text"])
+
+
 if __name__ == "__main__":
 	unittest.main()

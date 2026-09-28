@@ -4,6 +4,10 @@ Blocking these keeps an AI client (or a prompt injected into one) from
 granting itself more access, reading credentials, or running code.
 """
 
+from typing import Optional
+
+from .filters import IDENTIFIER
+
 # The connector's own configuration and audit trail, plus credential stores.
 NEVER_EXPOSED = frozenset(
 	{
@@ -36,7 +40,6 @@ READ_ONLY = frozenset(
 		"DocField",
 		"DocPerm",
 		"Custom DocPerm",
-		"Custom Field",
 		"Property Setter",
 		"Customize Form",
 		"Server Script",
@@ -125,3 +128,42 @@ def is_writable(doctype: str) -> bool:
 def is_blocked_method(method: str) -> bool:
 	method = (method or "").strip()
 	return any(method == p.rstrip(".") or method.startswith(p) for p in BLOCKED_METHOD_PREFIXES)
+
+
+# Custom Field is writable, minus the settings that render raw HTML, call server
+# methods, run code (eval: in the browser, virtual fields on the server),
+# loosen permissions or copy values from records the profile may not reach.
+CUSTOM_FIELD = "Custom Field"
+_CUSTOM_FIELD_BLOCKED_TYPES = frozenset({"html", "html editor", "button"})
+_CUSTOM_FIELD_BLOCKED_FLAGS = ("ignore_xss_filter", "ignore_user_permissions", "is_virtual")
+
+# Frappe resolves DocType names case-insensitively and fixes the case on save.
+_NEVER_EXPOSED_FOLDED = frozenset(d.lower() for d in NEVER_EXPOSED)
+_NOT_WRITABLE_FOLDED = _NEVER_EXPOSED_FOLDED | frozenset(d.lower() for d in READ_ONLY)
+
+
+def custom_field_problem(values: dict) -> Optional[str]:
+	"""Why a Custom Field holding these values may not be saved over MCP, or None."""
+
+	def text(key):
+		value = values.get(key)
+		return value.strip() if isinstance(value, str) else ""
+
+	if text("dt").lower() in _NOT_WRITABLE_FOLDED:
+		return f"Custom fields cannot be added to {text('dt')} over MCP"
+	if text("fieldtype").lower() in _CUSTOM_FIELD_BLOCKED_TYPES:
+		return f"{text('fieldtype')} fields cannot be created over MCP"
+	if text("options").lower() in _NEVER_EXPOSED_FOLDED:
+		return f"A custom field cannot point at {text('options')} over MCP"
+	if text("fetch_from"):
+		return "'fetch_from' cannot be set over MCP: it copies values from other records"
+	for flag in _CUSTOM_FIELD_BLOCKED_FLAGS:
+		if values.get(flag):
+			return f"'{flag}' cannot be set over MCP"
+	for key in values:
+		value = text(key)
+		if key.endswith("depends_on") and value and not IDENTIFIER.match(value):
+			return f"'{key}' may only name a field over MCP; expressions are not allowed"
+		if value.lower().startswith("eval:"):
+			return f"'{key}' cannot hold an eval: expression over MCP"
+	return None

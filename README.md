@@ -235,8 +235,8 @@ browser does not disconnect Claude. The connection lasts until one of these happ
 
 - the person disconnects the connector in Claude, or removes it on ERPNext's `/third_party_apps` page;
 - you set their *OAuth Bearer Token* to Revoked;
-- you disable the ERPNext user (Frappe itself keeps accepting a disabled user's OAuth tokens, so the
-  connector refuses disabled users on its own);
+- you disable the ERPNext user (v15 refuses a disabled user's OAuth tokens itself; v14 still accepts
+  them, so the connector refuses disabled users on its own);
 - you take them out of every profile, which removes their tools at once, or pause the MCP server.
 
 ### 3.2 API key clients
@@ -344,9 +344,18 @@ written directly.
 
 Some DocTypes are protected regardless of profiles: the connector's own configuration and audit
 log, credential stores (OAuth tokens, social login keys…) and System Console are never exposed;
-DocTypes that hold code, templates, schema, sharing or permissions (DocType, Custom Field, Server
+DocTypes that hold code, templates, schema, sharing or permissions (DocType, Property Setter, Server
 Script, Print Format, Letter Head, Website and Portal Settings, Address Template, Translation, User,
 Role, User Permission, DocShare, Assignment Rule, Report, Workflow…) can be granted **Read** only.
+
+**Custom Field** is the exception: grant it Create (and Update) and the AI can add fields to DocTypes
+with `create_document`. The MCP user also needs a role Frappe lets create custom fields (System
+Manager by default). Before anything is saved, the connector refuses fields on protected DocTypes;
+HTML, HTML Editor and Button fields; Links and Tables pointing at never-exposed DocTypes;
+`fetch_from`; expressions in the `depends_on` properties (a plain fieldname is fine) and `eval:` in
+any value; and `ignore_xss_filter`, `ignore_user_permissions` and `is_virtual`. A Custom Field row
+cannot use Scope filters: saving a custom field alters the table and commits at once, so a scope
+check afterwards could not undo it.
 
 ---
 
