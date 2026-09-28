@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from .action_types import CANCEL, CREATE, DELETE, READ, REPORT, SUBMIT, UPDATE
+from .naming import MAX_SERIES_LENGTH
 
 ANY_OPERATION = "*"  # enum lists every doctype with at least one granted operation
 
@@ -34,6 +35,7 @@ class ToolDefinition:
 	read_only: bool = False
 	destructive: bool = False
 	idempotent: bool = False
+	configures: bool = False  # changes the DocType's setup, not its records
 
 
 def _doctype_arg(ctx: SchemaContext, description: str = "DocType name") -> dict:
@@ -147,6 +149,22 @@ def _workflow_schema(ctx: SchemaContext) -> dict:
 	)
 
 
+def _naming_series_schema(ctx: SchemaContext) -> dict:
+	return _obj(
+		{
+			"doctype": _doctype_arg(ctx),
+			"series": {
+				"type": "string",
+				"minLength": 1,
+				"maxLength": MAX_SERIES_LENGTH,
+				"description": "The series, e.g. \"C-.#####\" (C-00001, C-00002…) or \"INV-.YYYY.-.####\". Fixed text, "
+				".YYYY. .YY. .MM. .DD. for the date and .#### for the counter; separate parts with dots.",
+			},
+		},
+		("doctype", "series"),
+	)
+
+
 def _no_args_schema(ctx: SchemaContext) -> dict:
 	return _obj({})
 
@@ -253,6 +271,18 @@ BUILTIN_TOOLS = (
 		operation=UPDATE,
 	),
 	ToolDefinition(
+		name="set_naming_series",
+		action_type=UPDATE,
+		title="Set the naming series",
+		description="Make a naming series the default for new records of a DocType. Existing records keep their names and "
+		"the DocType's other series stay selectable. Customer, Supplier and Item use it only when Selling, Buying or "
+		"Stock Settings name them by \"Naming Series\"; the result says which setting to check.",
+		build_schema=_naming_series_schema,
+		operation=UPDATE,
+		idempotent=True,
+		configures=True,
+	),
+	ToolDefinition(
 		name="delete_document",
 		action_type=DELETE,
 		title="Delete a document",
@@ -315,6 +345,7 @@ BUILTIN_BY_NAME = {tool.name: tool for tool in BUILTIN_TOOLS}
 
 # Tools that carry out each document operation (workflow transitions can submit or cancel).
 OPERATION_TOOLS = {
-	op: tuple(t.name for t in BUILTIN_TOOLS if t.operation == op) + (("apply_workflow_action",) if op in (SUBMIT, CANCEL) else ())
+	op: tuple(t.name for t in BUILTIN_TOOLS if t.operation == op and not t.configures)
+	+ (("apply_workflow_action",) if op in (SUBMIT, CANCEL) else ())
 	for op in (READ, CREATE, UPDATE, DELETE, SUBMIT, CANCEL)
 }

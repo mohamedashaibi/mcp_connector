@@ -357,6 +357,13 @@ any value; and `ignore_xss_filter`, `ignore_user_permissions` and `is_virtual`. 
 cannot use Scope filters: saving a custom field alters the table and commits at once, so a scope
 check afterwards could not undo it.
 
+**Naming series** ("name new customers `C-.#####`") go through the `set_naming_series` action. Tick
+it in the profile and grant Update on the DocType with no Scope and without hiding `naming_series`;
+the MCP user also needs write on Document Naming Settings (System Manager by default). The new series
+becomes the default, the DocType's other series stay selectable and existing records keep their
+names. Customer, Supplier and Item only follow it when Selling, Buying or Stock Settings name them
+by "Naming Series" — grant Update on that Settings DocType too if the AI should switch it.
+
 ---
 
 ## 5. Tools the AI gets
@@ -371,6 +378,7 @@ check afterwards could not undo it.
 | `create_document` | Create | Insert a record (Draft for submittable DocTypes) |
 | `update_document` | Update | Change fields; child tables merge by row name |
 | `apply_workflow_action` | Update | Approve / Reject … through the DocType's workflow |
+| `set_naming_series` | Update | Makes a naming series (e.g. `C-.#####`) the default for new records of a DocType |
 | `delete_document` | Delete | Delete a record |
 | `submit_document` | Submit | Submit a draft |
 | `cancel_document` | Cancel | Cancel a submitted document |

@@ -132,7 +132,7 @@ class TestConsoleApi(McpTestCase):
 		data = console.bootstrap()
 		self.assertTrue(data["endpoint"].endswith("/api/method/mcp_connector.api.mcp.endpoint"))
 		self.assertIn("Console Sales", [p["name"] for p in data["profiles"]])
-		self.assertEqual(len([a for a in data["actions"] if a["is_standard"]]), 14)
+		self.assertEqual(len([a for a in data["actions"] if a["is_standard"]]), 15)
 		self.assertIn("MCP Profile", data["protected"]["never"])
 		self.assertEqual(data["dashboard"]["hours"], 24)
 

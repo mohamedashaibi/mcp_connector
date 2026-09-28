@@ -25,6 +25,7 @@ from mcp_connector.domain.filters import (
 	require_fields,
 	sort_rows,
 )
+from mcp_connector.domain.naming import NAMING_SERIES_FIELD, NAMING_SETTINGS, SERIES_SWITCHES, with_default_series
 from mcp_connector.domain.policy import ActionSpec, EffectivePolicy, union_rules
 from mcp_connector.domain.protected import CUSTOM_FIELD, custom_field_problem, is_blocked_method, is_exposable, is_writable
 
@@ -471,6 +472,29 @@ class ApplyWorkflowActionTool(DocumentTool):
 		)
 
 
+class SetNamingSeriesTool(DocumentTool):
+	operation = UPDATE
+
+	def execute(self, args: dict, ctx: ToolContext) -> ToolOutcome:
+		doctype = args["doctype"]
+		grants, info = self.prepare(ctx, doctype)
+		# The series names every future record, so one grant must cover all records and the field.
+		if not any(not g.scope and g.field_rule.allows(NAMING_SERIES_FIELD) for g in grants):
+			raise PolicyDenied(f"Changing the naming series needs an Update grant on {doctype} with no scope that does not hide '{NAMING_SERIES_FIELD}'")
+		field = info.field(NAMING_SERIES_FIELD)
+		if field is None:
+			raise InvalidArguments(f"{doctype} is not named by a naming series")
+		if not ctx.gateway.has_permission(NAMING_SETTINGS, "write"):
+			raise PolicyDenied(f"Your ERPNext roles do not allow changing naming series ({NAMING_SETTINGS})")
+		options, must_select = with_default_series(field.options, args["series"])
+		ctx.gateway.set_naming_series(doctype, options, must_select)
+		payload = {"doctype": doctype, "default_series": options[0], "series": options}
+		if doctype in SERIES_SWITCHES:
+			settings, fieldname = SERIES_SWITCHES[doctype]
+			payload["note"] = f"ERPNext uses this series only when {settings} '{fieldname}' is \"Naming Series\"."
+		return ToolOutcome(payload, summary=f"{doctype} naming series: {options[0]}", document_type=doctype)
+
+
 def _report_payload_base(info) -> dict:
 	payload = {"report_name": info.name, "report_type": info.report_type}
 	if info.ref_doctype:
@@ -605,6 +629,7 @@ BUILTIN_HANDLERS = {
 	"create_document": CreateDocumentTool(),
 	"update_document": UpdateDocumentTool(),
 	"apply_workflow_action": ApplyWorkflowActionTool(),
+	"set_naming_series": SetNamingSeriesTool(),
 	"delete_document": DeleteDocumentTool(),
 	"submit_document": SubmitDocumentTool(),
 	"cancel_document": CancelDocumentTool(),

@@ -264,6 +264,23 @@ class FrappeErpGateway:
 			doc = self._load(doctype, name, "read")
 			return self._as_dict(apply_workflow(doc.as_dict(), action))
 
+	# -- setup ------------------------------------------------------------
+	def set_naming_series(self, doctype, options, user_must_always_select) -> None:
+		# Frappe's own path (validation, duplicate check, property setters); it skips permission
+		# checks, so the use case has already required write on Document Naming Settings.
+		with erp_errors():
+			settings = frappe.get_doc("Document Naming Settings")
+			settings.transaction_type = doctype
+			settings.naming_series_options = "\n".join(options)
+			settings.user_must_always_select = int(user_must_always_select)
+			try:
+				settings.update_series()
+			except KeyError as e:
+				# v14/v15 check_duplicate files clashes under the series minus its trailing '#' but
+				# looks them up unstripped, so a clash raises KeyError instead of its own message.
+				raise ErpFailure("validation", f"Series {e.args[0]} is already used by another DocType") from e
+		self._infos.pop(doctype, None)
+
 	# -- reports ----------------------------------------------------------
 	def report_info(self, report) -> Optional[ReportInfo]:
 		if not report or not frappe.db.exists("Report", report):

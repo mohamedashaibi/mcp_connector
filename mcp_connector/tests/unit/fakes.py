@@ -125,6 +125,9 @@ class FakeGateway:
 		self.docs[doctype][name]["docstatus"] = transition["next_docstatus"]
 		return copy.deepcopy(self.docs[doctype][name])
 
+	def set_naming_series(self, doctype, options, user_must_always_select):
+		self.calls.append(("naming_series", doctype, list(options), user_must_always_select))
+
 	def report_info(self, report):
 		entry = self.reports.get(report)
 		return entry[0] if entry else None

@@ -27,7 +27,7 @@ need(/Frappe \*\*v14\*\* or \*\*v15\*\*/.test(readme), "README should state the 
 for (const branch of ["version-14", "version-15"]) need(readme.includes(`\`${branch}\``), `README Docker table lacks ${branch}`);
 
 const tools = [...read("mcp_connector/domain/catalog.py").matchAll(/name="([a-z_]+)"/g)].map((m) => m[1]);
-need(tools.length === 14, `expected 14 built-in tools in catalog.py, found ${tools.length}`);
+need(tools.length === 15, `expected 15 built-in tools in catalog.py, found ${tools.length}`);
 for (const tool of tools) need(readme.includes(`\`${tool}\``), `README tools table misses ${tool}`);
 
 const settings = JSON.parse(read("mcp_connector/mcp_connector/doctype/mcp_settings/mcp_settings.json"));

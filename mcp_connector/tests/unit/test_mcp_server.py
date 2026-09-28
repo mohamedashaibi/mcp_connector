@@ -13,8 +13,9 @@ from mcp_connector.application.mcp_server import (
 )
 from mcp_connector.domain.action_types import CANCEL, CREATE, CUSTOM, DELETE, READ, REPORT, SUBMIT, UPDATE
 from mcp_connector.domain.audit import AUDIT_DISABLED, AUDIT_WRITES_AND_FAILURES, DENIED, ERROR, REDACTED, SUCCESS
-from mcp_connector.domain.catalog import BUILTIN_TOOLS
+from mcp_connector.domain.catalog import BUILTIN_TOOLS, OPERATION_TOOLS
 from mcp_connector.domain.jsonrpc import INVALID_PARAMS, METHOD_NOT_FOUND
+from mcp_connector.domain.naming import NAMING_SETTINGS
 from mcp_connector.domain.policy import (
 	EXCLUDE_LISTED,
 	ONLY_LISTED,
@@ -697,6 +698,55 @@ class TestCustomFields(unittest.TestCase):
 		result = h.call("create_document", doctype="Custom Field", data=self.FIELD)
 		self.assertTrue(result["isError"])
 		self.assertIn("record scope", result["text"])
+
+
+class TestNamingSeries(unittest.TestCase):
+	def harness(self, rule=None):
+		rule = rule or DoctypeRule("Customer", frozenset({READ, UPDATE}))
+		p = _p("N", {READ, UPDATE}, {"set_naming_series", "list_doctypes"}, [rule, DoctypeRule("Sales Invoice", frozenset({READ, UPDATE}))])
+		h = Harness(profiles=(p,), user="u", roles=())
+		h.gateway.add_doctype("Customer", [field("customer_name"), field("naming_series", "Select", options="CUST-.YYYY.-")])
+		h.gateway.add_doctype(NAMING_SETTINGS, [], issingle=True)
+		return h
+
+	@staticmethod
+	def series_calls(h):
+		return [c for c in h.gateway.calls if c[0] == "naming_series"]
+
+	def test_new_default_keeps_existing_series(self):
+		h = self.harness()
+		result = h.call("set_naming_series", doctype="Customer", series="C-.#####")
+		self.assertFalse(result["isError"], result["text"])
+		self.assertEqual(self.series_calls(h), [("naming_series", "Customer", ["C-.#####", "CUST-.YYYY.-"], False)])
+		self.assertIn("Selling Settings", result["data"]["note"])
+		self.assertEqual(h.audit.entries[-1].status, SUCCESS)
+
+	def test_refusals_never_reach_frappe(self):
+		scoped = DoctypeRule("Customer", frozenset({UPDATE}), scope=(("territory", "=", "North"),))
+		hidden = DoctypeRule("Customer", frozenset({UPDATE}), FieldRule(EXCLUDE_LISTED, frozenset({"naming_series"})))
+		cases = [
+			(None, "Customer", "C-<b>.###", "series must"),
+			(None, "Sales Invoice", "SI-.###", "not named by a naming series"),
+			(scoped, "Customer", "C-.#####", "with no scope"),
+			(hidden, "Customer", "C-.#####", "does not hide"),
+		]
+		for rule, doctype, series, message in cases:
+			h = self.harness(rule)
+			result = h.call("set_naming_series", doctype=doctype, series=series)
+			self.assertTrue(result["isError"], message)
+			self.assertIn(message, result["text"])
+			self.assertEqual(self.series_calls(h), [])
+
+	def test_needs_erp_permission_on_naming_settings(self):
+		h = self.harness()
+		h.gateway.denied.add((NAMING_SETTINGS, "write"))
+		self.assertIn("naming series", h.call("set_naming_series", doctype="Customer", series="C-.#####")["text"])
+		self.assertEqual(self.series_calls(h), [])
+
+	def test_it_does_not_count_as_updating_records(self):
+		h = self.harness()
+		self.assertNotIn("set_naming_series", OPERATION_TOOLS[UPDATE])
+		self.assertEqual(h.call("list_doctypes")["data"]["count"], 0)  # no record tool enabled
 
 
 if __name__ == "__main__":

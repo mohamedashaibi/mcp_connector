@@ -22,6 +22,7 @@ from mcp_connector.domain.filters import (
 	sort_rows,
 )
 from mcp_connector.domain.jsonrpc import INVALID_PARAMS, INVALID_REQUEST, RpcError, parse_message
+from mcp_connector.domain.naming import with_default_series
 from mcp_connector.domain.protected import custom_field_problem, is_blocked_method, is_exposable, is_writable
 from mcp_connector.domain.schema import validate_arguments, validate_input_schema
 
@@ -247,6 +248,18 @@ class TestProtected(unittest.TestCase):
 			self.assertTrue(is_blocked_method(method), method)
 		for method in ("erpnext.stock.utils.get_stock_balance", "frappe.clientele.x"):
 			self.assertFalse(is_blocked_method(method), method)
+
+
+class TestNamingSeries(unittest.TestCase):
+	def test_new_default_goes_first_and_existing_series_stay(self):
+		self.assertEqual(with_default_series("CUST-.YYYY.-\nC-.#####", " C-.##### "), (["C-.#####", "CUST-.YYYY.-"], False))
+		self.assertEqual(with_default_series("\nA-.###\nB-.###", "B-.###"), (["B-.###", "A-.###"], True))  # must-select kept
+		self.assertEqual(with_default_series("", "INV-.YYYY.-.####"), (["INV-.YYYY.-.####"], False))
+
+	def test_rejects_what_frappe_would_not_accept(self):
+		for bad in ("", "   ", None, 5, "C-<b>.###", "C-.###\nX", "C;DROP", "a" * 101):
+			with self.assertRaises(InvalidArguments, msg=repr(bad)):
+				with_default_series("", bad)
 
 
 class TestAuditRules(unittest.TestCase):
