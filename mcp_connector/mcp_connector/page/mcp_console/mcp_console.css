@@ -1868,6 +1868,29 @@
 	gap: 12px;
 }
 
+.mcpc-uris {
+	display: grid;
+	gap: 4px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+
+.mcpc-redirect {
+	max-width: 720px;
+}
+
+.mcpc-chatgpt-client:not(:empty) + .mcpc-redirect {
+	margin-top: 24px;
+}
+
+.mcpc-redirect .form-control {
+	flex: 1 1 320px;
+	min-width: 0;
+}
+
 .mcpc-secret {
 	max-width: 720px;
 	margin-top: 16px;

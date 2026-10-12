@@ -1,6 +1,6 @@
 # MCP Connector for ERPNext / Frappe v14 and v15
 
-Connect AI assistants (Claude, Cursor, VS Code Copilot, any MCP client) to ERPNext through the
+Connect AI assistants (Claude, ChatGPT, Cursor, VS Code Copilot, any MCP client) to ERPNext through the
 [Model Context Protocol](https://modelcontextprotocol.io), with access you control down to the
 role, action type, action, DocType, field, record and report.
 
@@ -189,11 +189,13 @@ sidebar entry, and granting them role permissions on these DocTypes has no effec
 
 ## 3. Connect an AI client
 
-There are two ways in, and both run every request as a real ERPNext user:
+There are three ways in, and all of them run every request as a real ERPNext user:
 
 - **Claude connector link** (claude.ai, Claude Desktop, Claude mobile): paste the endpoint URL into
   Claude's *Add custom connector*. Each person signs in with their own ERPNext account, so each
   gets exactly their own profile.
+- **ChatGPT connector**: the same endpoint and the same per-person sign-in, added in ChatGPT as a
+  custom app.
 - **API key** (Claude Code, Cursor, VS Code, scripts): the tool signs in as one integration user.
 
 ### 3.1 Claude connector link
@@ -239,7 +241,41 @@ browser does not disconnect Claude. The connection lasts until one of these happ
   them, so the connector refuses disabled users on its own);
 - you take them out of every profile, which removes their tools at once, or pause the MCP server.
 
-### 3.2 API key clients
+### 3.2 ChatGPT connector
+
+ChatGPT's custom apps sign people in with OAuth as well, against the same endpoint and the same
+ERPNext OAuth server. One thing differs from Claude: ChatGPT gives every connector its own redirect
+URL, and ERPNext has to allow that URL before anyone can sign in through it.
+
+Before you start, the three requirements of 3.1 apply (public HTTPS, `host_name`, `/.well-known/`).
+Custom apps also need ChatGPT's *Developer mode*. Which plans have it, and which of them may run
+actions that change data, is OpenAI's decision and changes often, so check their help centre.
+
+1. In ChatGPT, open *Settings → Apps → Advanced settings* and turn on **Developer mode**. Choose
+   **Create app**, name it, and paste
+   `https://erp.example.com/api/method/mcp_connector.api.mcp.endpoint` as the **MCP Server URL**.
+   Set **Authentication** to **OAuth** and open its advanced settings, where you enter your own
+   OAuth client. Copy the redirect URL ChatGPT shows there (it looks like
+   `https://chatgpt.com/connector/oauth/…`) and keep that page open.
+2. In ERPNext, open *Console → Connect → ChatGPT connector*, paste the redirect URL and choose
+   **Allow this redirect URL**. The first one creates the client: copy its client ID and client
+   secret. **Run check** confirms ChatGPT can discover the sign-in documents through your address.
+3. Back in ChatGPT, paste the client ID and client secret, then create the app.
+4. Each person connects the app, signs in to ERPNext and chooses **Allow**. Someone no profile
+   covers gets no tools (the endpoint answers 403).
+
+ChatGPT renames these menus now and then; what matters is the redirect URL it shows for your app.
+Each app has its own, so when you create another one (a second workspace, or an app you deleted
+and made again), allow its redirect URL the same way: it joins the same client, and everyone keeps
+signing in as themselves. Remove a URL you no longer use on the client's *OAuth Client* form
+(**Manage in ERPNext**).
+
+The client accepts only redirect URLs you allowed, and the console allows only ChatGPT's own:
+`https://chatgpt.com/connector/oauth/…` and its shared
+`https://chatgpt.com/connector_platform_oauth_redirect`. Tokens, refresh and the ways a connection
+ends are the same as for Claude in 3.1.
+
+### 3.3 API key clients
 
 *Console → Connect → API key* generates the configuration for you. Manually:
 
@@ -410,8 +446,9 @@ inside your method — validate what it does. Generic CRUD and auth methods (`fr
 
 - Every request is authenticated by Frappe itself (API key/secret, OAuth bearer token, or a desk
   session with CSRF token) and executes as that user.
-- **Claude connector sign-in** is protected by PKCE, by the client accepting only Claude's callback
-  URLs, and by each person's own ERPNext login and consent. Frappe's token endpoint does not check
+- **Claude and ChatGPT connector sign-in** is protected by PKCE, by each client accepting only its
+  own callback URLs (Claude's two, and the ChatGPT redirect URLs you allowed), and by each person's
+  own ERPNext login and consent. Frappe's token endpoint does not check
   the client secret, so treat the secret as an identifier, not as a barrier. Like API keys, OAuth
   tokens can also reach ERPNext's regular REST API as that person.
 - **Profiles govern what the AI does over MCP, not what the key can do elsewhere.** Whoever holds the

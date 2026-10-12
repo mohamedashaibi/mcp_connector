@@ -18,6 +18,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 
 (() => {
 	const API = "mcp_connector.api.console.";
+	const CHATGPT_REDIRECT = "https://chatgpt.com/connector/oauth/"; // one per ChatGPT connector, id appended
 	const OPS = ["Read", "Create", "Update", "Delete", "Submit", "Cancel"];
 	const TYPES = ["Read", "Create", "Update", "Delete", "Submit", "Cancel", "Report", "Custom"];
 	const OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "like", "not like", "in", "not in", "is", "between"];
@@ -111,7 +112,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 			this.settings_draft = null;
 			this.activity = { status: "", user: "", tool: "", hours: 24, rows: [], has_more: false };
 			this.dash_hours = 24;
-			this.connect = { mode: "claude", user: "", keys: null, client: "claude_code", test: null, claude: null, discovery: null };
+			this.connect = { mode: "claude", user: "", keys: null, client: "claude_code", test: null, claude: null, chatgpt: null, discovery: null };
 			this.field_cache = {};
 			this.report_cache = {};
 			this.build_shell();
@@ -169,6 +170,10 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				const el = e.target.closest("[data-act]");
 				if (!el || !this.root.contains(el) || el.disabled) return;
 				this.handle(el.dataset.act, el, e);
+			});
+			this.root.addEventListener("submit", (e) => {
+				const form = e.target.closest("[data-submit]");
+				if (form) this.handle(form.dataset.submit, form, e);
 			});
 			this.root.addEventListener("input", (e) => {
 				if (e.target.dataset && e.target.dataset.role === "matrix-filter") {
@@ -337,6 +342,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				"generate-keys": () => this.generate_keys(),
 				"run-test": () => this.run_test(),
 				"create-claude-client": () => this.create_claude_client(el),
+				"allow-chatgpt-redirect": () => this.allow_chatgpt_redirect(el),
 				"check-discovery": () => this.check_discovery(),
 				"toggle-setting": () => this.toggle_setting(el.dataset.field),
 				"save-settings": () => this.save_settings(),
@@ -360,6 +366,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				this.load_logs(true);
 			} else if (name === "connect-mode") {
 				this.connect.mode = value;
+				this.connect.discovery = null; // its wording names the client it was run for
 				this.render_connect();
 				return;
 			} else if (name === "client") {
@@ -2085,14 +2092,49 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				`<header class="mcpc-head">
 					<div>
 						<h1 class="mcpc-title">${esc(__("Connect a client"))}</h1>
-						<p class="mcpc-lede">${esc(__("Every request runs as a real ERPNext user: that user's roles pick the access profile, and their ERPNext permissions still apply. Add the connector link in Claude so each person signs in as themselves, or give a tool an API key of one integration user."))}</p>
+						<p class="mcpc-lede">${esc(__("Every request runs as a real ERPNext user: that user's roles pick the access profile, and their ERPNext permissions still apply. Add the connector link in Claude or ChatGPT so each person signs in as themselves, or give a tool an API key of one integration user."))}</p>
 					</div>
 				</header>
-				<div class="mcpc-connect-mode">${segmented("connect-mode", [["claude", __("Claude connector link")], ["apikey", __("API key")]], this.connect.mode, __("How clients sign in"))}</div>
+				<div class="mcpc-connect-mode">${segmented("connect-mode", [["claude", __("Claude connector link")], ["chatgpt", __("ChatGPT connector")], ["apikey", __("API key")]], this.connect.mode, __("How clients sign in"))}</div>
 				<div class="mcpc-connect-body"></div>`
 			);
 			if (this.connect.mode === "claude") this.render_connect_claude();
+			else if (this.connect.mode === "chatgpt") this.render_connect_chatgpt();
 			else this.render_connect_apikey();
+		}
+
+		// Steps the connector links share; `who` is the product that signs people in.
+		connector_url_step(who, company) {
+			return `<li>
+				<h2 class="mcpc-h3">${esc(__("Connector URL"))}</h2>
+				<div class="mcpc-endpoint mcpc-endpoint--lg"><code>${esc(this.data.endpoint)}</code>
+				<button type="button" class="btn btn-default btn-sm" data-act="copy-endpoint">${icon("copy", 14)}<span>${esc(__("Copy"))}</span></button></div>
+				<p class="mcpc-help">${esc(__("{0} connects from {1}'s servers, so this site has to answer at exactly this address over public HTTPS.", [who, company]))}</p>
+			</li>`;
+		}
+
+		connector_sign_in_steps(who) {
+			return `<li>
+				<h2 class="mcpc-h3">${esc(__("Each person signs in"))}</h2>
+				<p class="mcpc-help">${esc(__("They choose Connect, sign in to ERPNext and allow access. Their roles decide the profile; someone no profile covers gets no tools."))}</p>
+			</li>
+			<li>
+				<h2 class="mcpc-h3">${esc(__("Check sign-in discovery"))}</h2>
+				<p class="mcpc-help">${esc(__("Loads the documents {0} reads before sign-in, through the address you are using now.", [who]))}</p>
+				<button type="button" class="btn btn-default btn-sm" data-act="check-discovery">${esc(__("Run check"))}</button>
+				<div class="mcpc-discovery" aria-live="polite"></div>
+			</li>`;
+		}
+
+		oauth_client_html(client, who, hook) {
+			const row = (label, value) =>
+				`<div><dt>${esc(label)}</dt><dd class="mcpc-mono">${esc(value)} <button type="button" class="mcpc-iconbtn" data-act="copy-text" data-text="${esc(value)}" data-what="${esc(label)}" aria-label="${esc(__("Copy {0}", [label]))}">${icon("copy", 14)}</button></dd></div>`;
+			return `<dl class="mcpc-meta ${hook}">${row(__("Client ID"), client.client_id)}${row(__("Client secret"), client.client_secret)}</dl>
+				<p class="mcpc-help">${esc(
+					client.signed_in_users
+						? __("{0} signed in through {1} so far.", [plural(client.signed_in_users, __("person"), __("people")), who])
+						: __("Nobody has signed in through {0} yet.", [who])
+				)} <a class="mcpc-linkbtn" href="/app/oauth-client/${encodeURIComponent(client.name)}">${esc(__("Manage in ERPNext"))}</a></p>`;
 		}
 
 		render_connect_apikey() {
@@ -2155,12 +2197,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 			set_html(
 				this.$main.querySelector(".mcpc-connect-body"),
 				`<ol class="mcpc-flow">
-					<li>
-						<h2 class="mcpc-h3">${esc(__("Connector URL"))}</h2>
-						<div class="mcpc-endpoint mcpc-endpoint--lg"><code>${esc(this.data.endpoint)}</code>
-						<button type="button" class="btn btn-default btn-sm" data-act="copy-endpoint">${icon("copy", 14)}<span>${esc(__("Copy"))}</span></button></div>
-						<p class="mcpc-help">${esc(__("Claude connects from Anthropic's servers, so this site has to answer at exactly this address over public HTTPS."))}</p>
-					</li>
+					${this.connector_url_step("Claude", "Anthropic")}
 					<li>
 						<h2 class="mcpc-h3">${esc(__("Client ID for Claude"))}</h2>
 						<p class="mcpc-help">${esc(__("Create it once; everyone who connects shares it, and each person still signs in as themselves."))}</p>
@@ -2176,21 +2213,110 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 							<li>${how("Choose {0}.", ["Add"])}</li>
 						</ol>
 					</li>
-					<li>
-						<h2 class="mcpc-h3">${esc(__("Each person signs in"))}</h2>
-						<p class="mcpc-help">${esc(__("They choose Connect, sign in to ERPNext and allow access. Their roles decide the profile; someone no profile covers gets no tools."))}</p>
-					</li>
-					<li>
-						<h2 class="mcpc-h3">${esc(__("Check sign-in discovery"))}</h2>
-						<p class="mcpc-help">${esc(__("Loads the documents Claude reads before sign-in, through the address you are using now."))}</p>
-						<button type="button" class="btn btn-default btn-sm" data-act="check-discovery">${esc(__("Run check"))}</button>
-						<div class="mcpc-discovery" aria-live="polite"></div>
-					</li>
+					${this.connector_sign_in_steps("Claude")}
 				</ol>`
 			);
 			this.render_claude_client();
 			this.render_discovery();
 			if (!this.connect.claude) this.load_claude_client();
+		}
+
+		render_connect_chatgpt() {
+			const how = (template, parts) => __(template, parts.map(bold));
+			set_html(
+				this.$main.querySelector(".mcpc-connect-body"),
+				`<ol class="mcpc-flow">
+					${this.connector_url_step("ChatGPT", "OpenAI")}
+					<li>
+						<h2 class="mcpc-h3">${esc(__("Start the connector in ChatGPT"))}</h2>
+						<ol class="mcpc-howto">
+							<li>${how("Open {0}, then {1}, and turn on {2}.", ["Settings → Apps", "Advanced settings", "Developer mode"])}
+								<span class="mcpc-howto__aside">${esc(__("In a Business, Enterprise or Edu workspace an owner may have to allow it first. ChatGPT renames these menus now and then."))}</span></li>
+							<li>${how("Choose {0}, name it, for example ERPNext, and paste the connector URL as the {1}.", ["Create app", "MCP Server URL"])}</li>
+							<li>${how("Set {0} to {1} and open its advanced settings, where you enter your own OAuth client.", ["Authentication", "OAuth"])}</li>
+							<li>${esc(__("Copy the redirect URL ChatGPT shows there, and keep that page open."))}</li>
+						</ol>
+					</li>
+					<li>
+						<h2 class="mcpc-h3">${esc(__("Client ID for ChatGPT"))}</h2>
+						<p class="mcpc-help">${esc(__("ChatGPT gives every connector its own redirect URL, and only the ones you allow here can sign people in. The first one creates the client; everyone who connects shares it, and each person still signs in as themselves."))}</p>
+						<div class="mcpc-chatgpt-client" aria-live="polite"></div>
+						<form class="mcpc-redirect" data-submit="allow-chatgpt-redirect" novalidate>
+							<label class="mcpc-label" for="mcpc-chatgpt-uri">${esc(__("Redirect URL from ChatGPT"))}</label>
+							<div class="mcpc-keyrow">
+								<input id="mcpc-chatgpt-uri" name="redirect_uri" type="url" inputmode="url" class="form-control mcpc-mono" maxlength="300" autocomplete="off" spellcheck="false" placeholder="${esc(CHATGPT_REDIRECT)}…" aria-describedby="mcpc-chatgpt-uri-error">
+								<button type="submit" class="btn btn-primary btn-sm">${esc(__("Allow this redirect URL"))}</button>
+							</div>
+							<p class="mcpc-warnline" id="mcpc-chatgpt-uri-error" role="alert" hidden></p>
+						</form>
+					</li>
+					<li>
+						<h2 class="mcpc-h3">${esc(__("Finish in ChatGPT"))}</h2>
+						<p class="mcpc-help">${esc(__("Paste the client ID and client secret into the OAuth settings you left open, then create the app."))}</p>
+					</li>
+					${this.connector_sign_in_steps("ChatGPT")}
+				</ol>`
+			);
+			this.render_chatgpt_client();
+			this.render_discovery();
+			if (!this.connect.chatgpt) this.load_chatgpt_client();
+		}
+
+		async load_chatgpt_client() {
+			try {
+				this.connect.chatgpt = await this.call("chatgpt_connector");
+			} catch (e) {
+				this.connect.chatgpt = { client: null, failed: true };
+			}
+			this.render_chatgpt_client();
+		}
+
+		render_chatgpt_client() {
+			const $el = this.$main.querySelector(".mcpc-chatgpt-client");
+			if (!$el) return;
+			const info = this.connect.chatgpt;
+			const client = info && info.client;
+			if (!info) {
+				set_html($el, `<p class="mcpc-help" aria-busy="true">${esc(__("Loading…"))}</p>`);
+			} else if (!client) {
+				set_html($el, info.failed ? `<p class="mcpc-warnline">${icon("alert", 14)}${esc(__("Could not load the client. Reload the page and try again."))}</p>` : "");
+			} else {
+				set_html(
+					$el,
+					`${this.oauth_client_html(client, "ChatGPT", "mcpc-chatgpt-keys")}
+					<p class="mcpc-label">${esc(__("Allowed redirect URLs"))}</p>
+					<ul class="mcpc-uris mcpc-mono">${client.redirect_uris.map((uri) => `<li>${esc(uri)}</li>`).join("")}</ul>`
+				);
+			}
+		}
+
+		async allow_chatgpt_redirect(form) {
+			const input = form.elements.redirect_uri;
+			const button = form.querySelector('[type="submit"]');
+			const $error = form.querySelector('[role="alert"]');
+			const uri = input.value.trim();
+			// The server decides; this only catches a wrong paste without a round trip.
+			const ok = /^https:\/\/chatgpt\.com\/connector(\/oauth\/.|_platform_oauth_redirect$)/.test(uri);
+			$error.hidden = ok;
+			set_html($error, ok ? "" : `${icon("alert", 14)}<span>${esc(__("Paste the redirect URL exactly as ChatGPT shows it. It starts with {0}", [CHATGPT_REDIRECT]))}</span>`);
+			input.toggleAttribute("aria-invalid", !ok);
+			if (!ok) {
+				input.focus();
+				return;
+			}
+			button.disabled = true;
+			button.setAttribute("aria-busy", "true");
+			try {
+				this.connect.chatgpt = await this.call("allow_chatgpt_redirect", { redirect_uri: uri }, true);
+				input.value = "";
+				frappe.show_alert({ message: __("Redirect URL allowed"), indicator: "green" }, 3);
+			} catch (e) {
+				return; // frappe.call has shown the server's reason
+			} finally {
+				button.disabled = false;
+				button.removeAttribute("aria-busy");
+			}
+			this.render_chatgpt_client();
 		}
 
 		async load_claude_client() {
@@ -2216,17 +2342,7 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 					${info.failed ? `<p class="mcpc-warnline">${icon("alert", 14)}${esc(__("Could not load the client. Reload the page and try again."))}</p>` : ""}`
 				);
 			} else {
-				const row = (label, value) =>
-					`<div><dt>${esc(label)}</dt><dd class="mcpc-mono">${esc(value)} <button type="button" class="mcpc-iconbtn" data-act="copy-text" data-text="${esc(value)}" data-what="${esc(label)}" aria-label="${esc(__("Copy {0}", [label]))}">${icon("copy", 14)}</button></dd></div>`;
-				set_html(
-					$el,
-					`<dl class="mcpc-meta mcpc-claude-keys">${row(__("Client ID"), client.client_id)}${row(__("Client secret"), client.client_secret)}</dl>
-					<p class="mcpc-help">${esc(
-						client.signed_in_users
-							? __("{0} signed in through Claude so far.", [plural(client.signed_in_users, __("person"), __("people"))])
-							: __("Nobody has signed in through Claude yet.")
-					)} <a class="mcpc-linkbtn" href="/app/oauth-client/${encodeURIComponent(client.name)}">${esc(__("Manage in ERPNext"))}</a></p>`
-				);
+				set_html($el, this.oauth_client_html(client, "Claude", "mcpc-claude-keys"));
 			}
 		}
 
@@ -2254,7 +2370,8 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 			this.connect.discovery = { running: true, steps };
 			this.render_discovery();
 			const https = endpoint.protocol === "https:";
-			steps.push({ key: "https", ok: https, text: https ? __("The connector URL uses HTTPS") : __("Claude needs HTTPS; this site announces itself over plain HTTP") });
+			const who = this.connect.mode === "chatgpt" ? "ChatGPT" : "Claude";
+			steps.push({ key: "https", ok: https, text: https ? __("The connector URL uses HTTPS") : __("{0} needs HTTPS; this site announces itself over plain HTTP", [who]) });
 			if (endpoint.origin !== window.location.origin) {
 				steps.push({
 					key: "origin",
