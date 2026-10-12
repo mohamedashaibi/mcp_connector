@@ -474,6 +474,12 @@ class FrappeOAuthClientRepository:
 		).insert()
 		return self._info(doc.name)
 
+	def add_redirect_uri(self, name: str, redirect_uri: str) -> dict:
+		doc = frappe.get_doc("OAuth Client", name)
+		doc.redirect_uris = " ".join([*(doc.redirect_uris or "").split(), redirect_uri])
+		doc.save()
+		return self._info(name)
+
 	@staticmethod
 	def _info(name: str) -> dict:
 		doc = frappe.get_doc("OAuth Client", name)

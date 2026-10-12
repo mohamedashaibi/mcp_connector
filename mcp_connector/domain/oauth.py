@@ -6,6 +6,10 @@ before the MCP endpoint runs. These rules only describe that server in the shape
 discover: protected resource metadata (RFC 9728) and authorization server metadata (RFC 8414).
 """
 
+import re
+
+from .errors import InvalidArguments
+
 PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource"
 AUTHORIZATION_SERVER_PATH = "/.well-known/oauth-authorization-server"
 FRAPPE_OAUTH_METHODS = "/api/method/frappe.integrations.oauth2."
@@ -19,6 +23,26 @@ CLAUDE_REDIRECT_URIS = (
 	"https://claude.com/api/mcp/auth_callback",
 )
 CLAUDE_CLIENT_NAME = "Claude (MCP Connector)"
+
+# ChatGPT has no fixed callback for this server: it gives each connector its own and shows it while
+# the connector is set up. (Its one shared callback is kept for servers that return `iss` with the
+# authorization code, which Frappe does not; it is accepted in case ChatGPT shows it.)
+CHATGPT_CLIENT_NAME = "ChatGPT (MCP Connector)"
+CHATGPT_REDIRECT_PREFIX = "https://chatgpt.com/connector/oauth/"
+_CHATGPT_REDIRECT = re.compile(
+	re.escape(CHATGPT_REDIRECT_PREFIX) + r"[A-Za-z0-9][A-Za-z0-9._~-]{0,199}"
+	r"|https://chatgpt\.com/connector_platform_oauth_redirect"
+)
+
+
+def chatgpt_redirect_uri(value) -> str:
+	"""The callback of one ChatGPT connector, exactly as ChatGPT shows it; anything else is refused."""
+	uri = value.strip() if isinstance(value, str) else ""
+	if not _CHATGPT_REDIRECT.fullmatch(uri):
+		raise InvalidArguments(
+			f"Paste the redirect URL exactly as ChatGPT shows it. It starts with {CHATGPT_REDIRECT_PREFIX}"
+		)
+	return uri
 
 
 def _site(site_url: str) -> str:

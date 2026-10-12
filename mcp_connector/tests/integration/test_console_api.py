@@ -81,6 +81,8 @@ class TestConsoleApi(McpTestCase):
 				lambda: console.generate_keys(F.SALES_USER),
 				console.claude_connector,
 				console.create_claude_connector,
+				console.chatgpt_connector,
+				lambda: console.allow_chatgpt_redirect("https://chatgpt.com/connector/oauth/refused"),
 			):
 				with self.assertRaises(frappe.PermissionError, msg=user):
 					call()
@@ -256,6 +258,37 @@ class TestClaudeConnector(McpTestCase):
 		self.assertEqual(frappe.db.count("OAuth Client", {"app_name": CLAUDE_CLIENT_NAME}), 1)
 		doc = frappe.get_doc("OAuth Client", client["name"])
 		self.assertEqual((doc.grant_type, doc.response_type, doc.skip_authorization), ("Authorization Code", "Code", 0))
+
+	def test_console_adds_each_chatgpt_callback_to_one_chatgpt_client(self):
+		from frappe.oauth import OAuthWebRequestValidator
+
+		from mcp_connector.domain.oauth import CHATGPT_CLIENT_NAME
+
+		frappe.set_user("Administrator")
+		first, second = "https://chatgpt.com/connector/oauth/gate-one", "https://chatgpt.com/connector/oauth/gate-two"
+		self.assertIsNone(console.chatgpt_connector()["client"])  # positive control: nothing yet
+		for refused in ("", "https://claude.ai/api/mcp/auth_callback", f"{first} https://evil.example/callback"):
+			with self.assertRaises(frappe.ValidationError, msg=refused):
+				console.allow_chatgpt_redirect(refused)
+		self.assertIsNone(console.chatgpt_connector()["client"])
+		created = console.allow_chatgpt_redirect(first)
+		self.addCleanup(frappe.delete_doc, "OAuth Client", created["client"]["name"], ignore_permissions=True, force=True)
+		client = created["client"]
+		self.assertEqual(client["redirect_uris"], [first])
+		self.assertTrue(client["client_id"] and client["client_secret"])
+		self.assertTrue(created["connector_url"].endswith("/api/method/mcp_connector.api.mcp.endpoint"))
+		for uri in (second, second, first):  # repeats change nothing
+			again = console.allow_chatgpt_redirect(uri)["client"]
+		self.assertEqual(again["redirect_uris"], [first, second])
+		self.assertEqual((again["client_id"], again["client_secret"]), (client["client_id"], client["client_secret"]))
+		self.assertEqual(console.chatgpt_connector()["client"]["redirect_uris"], [first, second])
+		self.assertEqual(frappe.db.count("OAuth Client", {"app_name": CHATGPT_CLIENT_NAME}), 1)
+		doc = frappe.get_doc("OAuth Client", client["name"])
+		self.assertEqual((doc.grant_type, doc.response_type, doc.skip_authorization), ("Authorization Code", "Code", 0))
+		# Frappe's own sign-in check: both connectors pass, anything else on the same host does not.
+		accepts = lambda uri: OAuthWebRequestValidator().validate_redirect_uri(client["client_id"], uri, None)  # noqa: E731
+		self.assertTrue(accepts(first) and accepts(second))
+		self.assertFalse(accepts("https://chatgpt.com/connector/oauth/gate-three"))
 
 	def test_discovery_documents_are_served_only_at_their_paths(self):
 		from mcp_connector.api.discovery import OAuthDiscoveryRenderer

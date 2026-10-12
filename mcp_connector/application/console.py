@@ -7,7 +7,7 @@ from mcp_connector.domain.action_types import ACTION_TYPES, DOC_OPERATIONS, FRAP
 from mcp_connector.domain.audit import DENIED, ERROR, SUCCESS
 from mcp_connector.domain.catalog import BUILTIN_TOOLS, OPERATION_TOOLS
 from mcp_connector.domain.errors import InvalidArguments, NotFound
-from mcp_connector.domain.oauth import CLAUDE_CLIENT_NAME, CLAUDE_REDIRECT_URIS
+from mcp_connector.domain.oauth import CHATGPT_CLIENT_NAME, CLAUDE_CLIENT_NAME, CLAUDE_REDIRECT_URIS, chatgpt_redirect_uri
 from mcp_connector.domain.policy import ALL_FIELDS, EffectivePolicy, match_reason, resolve_policy
 from mcp_connector.domain.protected import NEVER_EXPOSED, READ_ONLY, is_exposable, is_writable
 
@@ -78,6 +78,8 @@ class OAuthClientRepository(Protocol):
 	def find(self, app_name: str) -> Optional[dict]: ...  # {client_id, client_secret, redirect_uris, active_tokens, ...}
 
 	def create(self, app_name: str, redirect_uris: tuple) -> dict: ...
+
+	def add_redirect_uri(self, name: str, redirect_uri: str) -> dict: ...
 
 
 class CatalogRepository(Protocol):
@@ -454,3 +456,33 @@ class CreateClaudeConnector:
 	def execute(self) -> dict:
 		client = self.clients.find(CLAUDE_CLIENT_NAME) or self.clients.create(CLAUDE_CLIENT_NAME, CLAUDE_REDIRECT_URIS)
 		return {"client": client, "redirect_uris": list(CLAUDE_REDIRECT_URIS)}
+
+
+# -- ChatGPT connector (OAuth) --------------------------------------------------------
+
+
+class GetChatGPTConnector:
+	def __init__(self, clients: OAuthClientRepository):
+		self.clients = clients
+
+	def execute(self) -> dict:
+		return {"client": self.clients.find(CHATGPT_CLIENT_NAME)}
+
+
+class AllowChatGPTRedirect:
+	"""Let one ChatGPT connector sign people in.
+
+	Its callback joins the OAuth client ChatGPT uses, which the first callback creates. Idempotent.
+	"""
+
+	def __init__(self, clients: OAuthClientRepository):
+		self.clients = clients
+
+	def execute(self, redirect_uri) -> dict:
+		uri = chatgpt_redirect_uri(redirect_uri)
+		client = self.clients.find(CHATGPT_CLIENT_NAME)
+		if client is None:
+			client = self.clients.create(CHATGPT_CLIENT_NAME, (uri,))
+		elif uri not in client["redirect_uris"]:
+			client = self.clients.add_redirect_uri(client["name"], uri)
+		return {"client": client}

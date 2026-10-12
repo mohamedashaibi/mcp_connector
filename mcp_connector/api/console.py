@@ -225,3 +225,19 @@ def create_claude_connector():
 	data = uc.CreateClaudeConnector(FrappeOAuthClientRepository()).execute()
 	data["connector_url"] = frappe.utils.get_url(ENDPOINT_PATH)
 	return data
+
+
+@frappe.whitelist()
+def chatgpt_connector():
+	_require_manager()
+	data = uc.GetChatGPTConnector(FrappeOAuthClientRepository()).execute()
+	data["connector_url"] = frappe.utils.get_url(ENDPOINT_PATH)
+	return data
+
+
+@frappe.whitelist(methods=["POST"])
+def allow_chatgpt_redirect(redirect_uri=None):
+	_require_manager()
+	data = _run(uc.AllowChatGPTRedirect(FrappeOAuthClientRepository()).execute, redirect_uri)
+	data["connector_url"] = frappe.utils.get_url(ENDPOINT_PATH)
+	return data
