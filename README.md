@@ -498,9 +498,11 @@ deleted with the app's DocTypes), then `bench remove-app mcp_connector`.
   resources or prompts (tools cover the use case).
 - JSON-RPC batch arrays and malformed JSON bodies are rejected by Frappe's request parser before
   the app sees them, so they return Frappe's error format instead of a JSON-RPC error.
-- No dynamic client registration: create the Claude client in the console and paste its ID and
-  secret into Claude's *Advanced settings*. Other OAuth MCP clients need their own OAuth Client with
-  their callback URL.
+- No dynamic client registration: create the Claude or ChatGPT client in the console and paste its
+  ID and secret into that product's connector settings. Other OAuth MCP clients need their own
+  OAuth Client with their callback URL.
+- The ChatGPT connector follows OpenAI's published requirements for OAuth MCP servers; it has not
+  been tested end to end against ChatGPT itself.
 - OAuth tokens are ERPNext user tokens, not bound to the MCP endpoint as their only audience.
 - When one user matches several profiles with *different* record scopes on the same DocType,
   listing merges the scoped queries in memory and can page only within the first 5,000 rows (add
