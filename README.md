@@ -270,6 +270,12 @@ and made again), allow its redirect URL the same way: it joins the same client, 
 signing in as themselves. Remove a URL you no longer use on the client's *OAuth Client* form
 (**Manage in ERPNext**).
 
+If sign-in stops at ERPNext with `Mismatching redirect URI`, ChatGPT is using a redirect URL the
+client does not list (it issues a new one whenever the app is created again), or a client ID that
+is not the ChatGPT client's. Paste the whole address of that failing page into the same field: the
+console takes the redirect URL from it, allows it, and tells you when ChatGPT was given a different
+client ID.
+
 The client accepts only redirect URLs you allowed, and the console allows only ChatGPT's own:
 `https://chatgpt.com/connector/oauth/…` and its shared
 `https://chatgpt.com/connector_platform_oauth_redirect`. Tokens, refresh and the ways a connection

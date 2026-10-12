@@ -1891,6 +1891,14 @@
 	min-width: 0;
 }
 
+.mcpc-redirect .mcpc-help {
+	margin: 10px 0 0;
+}
+
+.mcpc-redirect .mcpc-help b {
+	font-weight: 600;
+}
+
 .mcpc-secret {
 	max-width: 720px;
 	margin-top: 16px;

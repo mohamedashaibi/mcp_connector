@@ -63,7 +63,7 @@ const chatgptRedirect = (read("mcp_connector/domain/oauth.py").match(/CHATGPT_RE
 need(chatgptRedirect, "CHATGPT_REDIRECT_PREFIX not found in domain/oauth.py");
 need(readme.includes(`${chatgptRedirect}…`), `README does not show the ChatGPT redirect URL ${chatgptRedirect}`);
 need(console_js.includes(`CHATGPT_REDIRECT = "${chatgptRedirect}"`), "console's ChatGPT redirect URL differs from domain/oauth.py");
-for (const step of ["Developer mode", "Create app", "MCP Server URL", "Allow this redirect URL"]) {
+for (const step of ["Developer mode", "Create app", "MCP Server URL", "Allow this redirect URL", "Mismatching redirect URI"]) {
 	need(readme.includes(step), `README ChatGPT connector steps lack "${step}"`);
 	need(console_js.includes(step), `console ChatGPT connector steps lack "${step}"`);
 }

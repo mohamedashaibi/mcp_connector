@@ -226,6 +226,36 @@ async function shoot(page, name) {
 	await page.evaluate(() => window.scrollTo(0, 0)); // keep the sticky navbar out of the full-page shot
 	await shoot(page, "light-desktop-connect-claude");
 
+	// ChatGPT connector: a wrong paste is refused beside the field, ChatGPT's redirect URL makes the client.
+	await page.locator('[data-seg="connect-mode"][data-value="chatgpt"]').click();
+	const redirectInput = page.locator("#mcpc-chatgpt-uri");
+	const redirectError = page.locator("#mcpc-chatgpt-uri-error");
+	check(!(await redirectError.isVisible()), "the redirect URL error should start hidden (positive control)");
+	await redirectInput.fill("https://claude.ai/api/mcp/auth_callback");
+	await page.locator('.mcpc-redirect [type="submit"]').click();
+	check((await redirectError.isVisible()) && (await redirectInput.getAttribute("aria-invalid")) !== null, "a redirect URL that is not ChatGPT's should be refused beside the field");
+	const chatgptRedirect = `https://chatgpt.com/connector/oauth/ui-gate-${Date.now().toString(36)}`;
+	await redirectInput.fill(chatgptRedirect);
+	await redirectInput.press("Enter");
+	await page.locator(".mcpc-uris li", { hasText: chatgptRedirect }).waitFor({ timeout: 15000 });
+	const chatgptClient = (await api(page, "chatgpt_connector")).client;
+	check((await page.locator(".mcpc-chatgpt-keys").innerText()).includes(chatgptClient.client_id), "ChatGPT client ID not shown");
+	check(chatgptClient.redirect_uris.includes(chatgptRedirect), "the allowed ChatGPT redirect URL was not stored");
+	check(!(await redirectError.isVisible()) && (await redirectInput.inputValue()) === "", "an allowed redirect URL should clear the field and its error");
+	// Recovery from "Mismatching redirect URI": the failing sign-in address names the redirect URL ChatGPT uses.
+	const signIn = (clientId, redirect) =>
+		`${BASE_URL}/api/method/frappe.integrations.oauth2.authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirect)}&scope=all&ui_locales=en-US`;
+	await redirectInput.fill(signIn(chatgptClient.client_id, `${chatgptRedirect}-again`));
+	await redirectInput.press("Enter");
+	await page.locator(".mcpc-uris li", { hasText: `${chatgptRedirect}-again` }).waitFor({ timeout: 15000 });
+	check(!(await redirectError.isVisible()), "a sign-in address carrying this client's ID should not warn");
+	await redirectInput.fill(signIn(claudeClient.client.client_id, `${chatgptRedirect}-other`));
+	await redirectInput.press("Enter");
+	await page.locator(".mcpc-uris li", { hasText: `${chatgptRedirect}-other` }).waitFor({ timeout: 15000 });
+	check((await redirectError.isVisible()) && (await redirectError.innerText()).includes(claudeClient.client.client_id), "a sign-in address carrying another client ID should say so");
+	await page.evaluate(() => window.scrollTo(0, 0));
+	await shoot(page, "light-desktop-connect-chatgpt");
+
 	// API key clients: snippets switch per client.
 	await page.locator('[data-seg="connect-mode"][data-value="apikey"]').click();
 	await page.locator('[data-seg="client"][data-value="cursor"]').click();

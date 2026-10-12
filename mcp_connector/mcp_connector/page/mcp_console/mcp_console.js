@@ -2244,10 +2244,11 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 						<form class="mcpc-redirect" data-submit="allow-chatgpt-redirect" novalidate>
 							<label class="mcpc-label" for="mcpc-chatgpt-uri">${esc(__("Redirect URL from ChatGPT"))}</label>
 							<div class="mcpc-keyrow">
-								<input id="mcpc-chatgpt-uri" name="redirect_uri" type="url" inputmode="url" class="form-control mcpc-mono" maxlength="300" autocomplete="off" spellcheck="false" placeholder="${esc(CHATGPT_REDIRECT)}…" aria-describedby="mcpc-chatgpt-uri-error">
+								<input id="mcpc-chatgpt-uri" name="redirect_uri" type="url" inputmode="url" class="form-control mcpc-mono" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="${esc(CHATGPT_REDIRECT)}…" aria-describedby="mcpc-chatgpt-uri-error mcpc-chatgpt-uri-hint">
 								<button type="submit" class="btn btn-primary btn-sm">${esc(__("Allow this redirect URL"))}</button>
 							</div>
 							<p class="mcpc-warnline" id="mcpc-chatgpt-uri-error" role="alert" hidden></p>
+							<p class="mcpc-help" id="mcpc-chatgpt-uri-hint">${how("Sign-in stopped at ERPNext with {0}? ChatGPT is using a redirect URL that is not allowed yet. Paste the whole address of that page here instead.", ["Mismatching redirect URI"])}</p>
 						</form>
 					</li>
 					<li>
@@ -2294,11 +2295,23 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 			const input = form.elements.redirect_uri;
 			const button = form.querySelector('[type="submit"]');
 			const $error = form.querySelector('[role="alert"]');
-			const uri = input.value.trim();
+			const warn = (message) => {
+				$error.hidden = !message;
+				set_html($error, message ? `${icon("alert", 14)}<span>${esc(message)}</span>` : "");
+			};
+			// A failed sign-in's address carries the redirect URL ChatGPT really uses, and the client ID it was given.
+			let uri = input.value.trim();
+			let signing_in_with = "";
+			try {
+				const params = new URL(uri).searchParams;
+				signing_in_with = (params.get("redirect_uri") && params.get("client_id")) || "";
+				uri = params.get("redirect_uri") || uri;
+			} catch (e) {
+				// not an address at all: refused just below
+			}
 			// The server decides; this only catches a wrong paste without a round trip.
 			const ok = /^https:\/\/chatgpt\.com\/connector(\/oauth\/.|_platform_oauth_redirect$)/.test(uri);
-			$error.hidden = ok;
-			set_html($error, ok ? "" : `${icon("alert", 14)}<span>${esc(__("Paste the redirect URL exactly as ChatGPT shows it. It starts with {0}", [CHATGPT_REDIRECT]))}</span>`);
+			warn(ok ? "" : __("Paste the redirect URL exactly as ChatGPT shows it. It starts with {0}", [CHATGPT_REDIRECT]));
 			input.toggleAttribute("aria-invalid", !ok);
 			if (!ok) {
 				input.focus();
@@ -2317,6 +2330,9 @@ frappe.pages["mcp-console"].on_page_show = function (wrapper) {
 				button.removeAttribute("aria-busy");
 			}
 			this.render_chatgpt_client();
+			if (signing_in_with && signing_in_with !== this.connect.chatgpt.client.client_id) {
+				warn(__("ChatGPT is signing in with client ID {0}, which is not this client. Paste the client ID and client secret above into ChatGPT's OAuth settings, then connect again.", [signing_in_with]));
+			}
 		}
 
 		async load_claude_client() {
