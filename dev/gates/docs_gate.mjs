@@ -58,6 +58,16 @@ for (const step of ["Customize → Connectors", "Add custom connector", "Advance
 }
 need(readme.includes("/.well-known/oauth-authorization-server"), "README does not explain OAuth discovery");
 
+// ChatGPT connector: the redirect URL and the in-ChatGPT steps match the code and the console.
+const chatgptRedirect = (read("mcp_connector/domain/oauth.py").match(/CHATGPT_REDIRECT_PREFIX = "([^"]+)"/) || [])[1];
+need(chatgptRedirect, "CHATGPT_REDIRECT_PREFIX not found in domain/oauth.py");
+need(readme.includes(`${chatgptRedirect}…`), `README does not show the ChatGPT redirect URL ${chatgptRedirect}`);
+need(console_js.includes(`CHATGPT_REDIRECT = "${chatgptRedirect}"`), "console's ChatGPT redirect URL differs from domain/oauth.py");
+for (const step of ["Developer mode", "Create app", "MCP Server URL", "Allow this redirect URL"]) {
+	need(readme.includes(step), `README ChatGPT connector steps lack "${step}"`);
+	need(console_js.includes(step), `console ChatGPT connector steps lack "${step}"`);
+}
+
 if (failures.length) {
 	console.error(`docs gate failed:\n- ${failures.join("\n- ")}`);
 	process.exit(1);
