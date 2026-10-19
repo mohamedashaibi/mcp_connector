@@ -1,7 +1,7 @@
 [project]
 name = "mcp_connector"
 authors = [
-    { name = "Mohammed Ashaibi", email = "mohashaibi2@gmail.com" }
+    { name = "Mohammed Ashaibi", email = "mohamed@ashaibi.com", website = "https://ashaibi.com" },
 ]
 description = "Model Context Protocol server for Frappe/ERPNext v14 and v15 with role-based access profiles"
 requires-python = ">=3.10"

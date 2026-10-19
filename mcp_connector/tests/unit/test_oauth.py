@@ -48,6 +48,11 @@ class TestOAuthDiscovery(unittest.TestCase):
 		self.assertEqual(doc["token_endpoint"], "https://erp.example.com/api/method/frappe.integrations.oauth2.get_token")
 		self.assertEqual(doc["response_types_supported"], ["code"])
 
+	def test_openid_is_not_advertised(self):
+		# ChatGPT asks for every OIDC scope it sees here, and Frappe fails to refresh a token that has
+		# `openid` (403 "No permission for User"), so the connection would die when it first expires.
+		self.assertEqual(oauth.authorization_server_metadata(SITE)["scopes_supported"], ["all"])
+
 	def test_documents_are_served_only_at_their_well_known_paths(self):
 		as_doc = oauth.discovery_document(".well-known/oauth-authorization-server", SITE, ENDPOINT)
 		self.assertEqual(as_doc["issuer"], "https://erp.example.com")

@@ -60,6 +60,14 @@ FILTERS_DESCRIPTION = (
 )
 
 
+def _filters_arg() -> dict:
+	# List-form rows are [field, operator, value] (or with a doctype first); the value is a scalar or,
+	# for in/not in/between, a list of scalars. ChatGPT refuses a tool whose array has no "items".
+	scalar = ["string", "number", "boolean", "null"]
+	value = {"type": [*scalar, "array"], "items": {"type": scalar}}
+	return {"type": ["object", "array"], "items": {"type": "array", "items": value}, "description": FILTERS_DESCRIPTION}
+
+
 def _list_documents_schema(ctx: SchemaContext) -> dict:
 	return _obj(
 		{
@@ -69,7 +77,7 @@ def _list_documents_schema(ctx: SchemaContext) -> dict:
 				"items": {"type": "string"},
 				"description": "Columns to return. Defaults to name, title and list-view fields. Child-table fields are not supported here; use get_document.",
 			},
-			"filters": {"type": ["object", "array"], "description": FILTERS_DESCRIPTION},
+			"filters": _filters_arg(),
 			"search": {
 				"type": "string",
 				"maxLength": 140,
@@ -101,7 +109,7 @@ def _doc_ref_schema(ctx: SchemaContext) -> dict:
 
 def _count_schema(ctx: SchemaContext) -> dict:
 	return _obj(
-		{"doctype": _doctype_arg(ctx), "filters": {"type": ["object", "array"], "description": FILTERS_DESCRIPTION}},
+		{"doctype": _doctype_arg(ctx), "filters": _filters_arg()},
 		("doctype",),
 	)
 

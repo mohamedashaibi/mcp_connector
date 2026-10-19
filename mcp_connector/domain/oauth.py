@@ -86,7 +86,9 @@ def authorization_server_metadata(site_url: str) -> dict:
 		# Frappe reads client credentials from the form body only: it would take an HTTP Basic
 		# header on the token request for an API key and reject the call.
 		"token_endpoint_auth_methods_supported": ["client_secret_post"],
-		"scopes_supported": [*SCOPES, "openid"],
+		# Not "openid": ChatGPT requests every OIDC scope listed here, and Frappe cannot refresh a
+		# token that has it (no user on the refresh request when it builds the new ID token).
+		"scopes_supported": list(SCOPES),
 	}
 
 

@@ -260,7 +260,9 @@ actions that change data, is OpenAI's decision and changes often, so check their
 2. In ERPNext, open *Console → Connect → ChatGPT connector*, paste the redirect URL and choose
    **Allow this redirect URL**. The first one creates the client: copy its client ID and client
    secret. **Run check** confirms ChatGPT can discover the sign-in documents through your address.
-3. Back in ChatGPT, paste the client ID and client secret, then create the app.
+3. Back in ChatGPT, paste the client ID and client secret, then create the app. If ChatGPT asks
+   how the client authenticates at the token endpoint, choose `client_secret_post`: ERPNext
+   refuses `client_secret_basic` with 401.
 4. Each person connects the app, signs in to ERPNext and chooses **Allow**. Someone no profile
    covers gets no tools (the endpoint answers 403).
 

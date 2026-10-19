@@ -174,6 +174,8 @@ class TestSchema(unittest.TestCase):
 			{"properties": {"x": {"type": "string"}}, "required": ["y"]},
 			{"properties": {}, "$ref": "#/defs"},
 			{"properties": {"x": {"type": "string", "pattern": ".*"}}},
+			{"properties": {"x": {"type": "array"}}},
+			{"properties": {"x": {"type": ["string", "array"]}}},
 		]
 		for bad in bad_schemas:
 			with self.assertRaises(InvalidArguments, msg=str(bad)):

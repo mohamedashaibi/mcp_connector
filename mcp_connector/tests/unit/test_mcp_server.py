@@ -13,7 +13,8 @@ from mcp_connector.application.mcp_server import (
 )
 from mcp_connector.domain.action_types import CANCEL, CREATE, CUSTOM, DELETE, READ, REPORT, SUBMIT, UPDATE
 from mcp_connector.domain.audit import AUDIT_DISABLED, AUDIT_WRITES_AND_FAILURES, DENIED, ERROR, REDACTED, SUCCESS
-from mcp_connector.domain.catalog import BUILTIN_TOOLS, OPERATION_TOOLS
+from mcp_connector.domain.catalog import BUILTIN_TOOLS, OPERATION_TOOLS, SchemaContext
+from mcp_connector.domain.errors import InvalidArguments
 from mcp_connector.domain.jsonrpc import INVALID_PARAMS, METHOD_NOT_FOUND
 from mcp_connector.domain.naming import NAMING_SETTINGS
 from mcp_connector.domain.policy import (
@@ -26,6 +27,7 @@ from mcp_connector.domain.policy import (
 	ReportRule,
 	resolve_policy,
 )
+from mcp_connector.domain.schema import validate_arguments
 
 from .fakes import FakeAudit, FakeGateway, FakeUnitOfWork, field, report
 
@@ -236,6 +238,28 @@ class TestToolsList(unittest.TestCase):
 		self.assertEqual(tools["list_documents"]["inputSchema"]["properties"]["limit"]["maximum"], 5)
 		self.assertFalse(tools["list_documents"]["inputSchema"]["additionalProperties"])
 		self.assertEqual(tools["stock_balance"]["inputSchema"]["required"], ["item_code"])
+
+	def test_every_array_declares_its_items(self):
+		# ChatGPT (OpenAI function calling) refuses a tool whose schema has an array without "items".
+		def arrays_without_items(node, path):
+			types = node.get("type") if isinstance(node.get("type"), list) else [node.get("type")]
+			found = [path] if "array" in types and "items" not in node else []
+			for name, sub in (node.get("properties") or {}).items():
+				found += arrays_without_items(sub, f"{path}.{name}")
+			if isinstance(node.get("items"), dict):
+				found += arrays_without_items(node["items"], f"{path}[]")
+			return found
+
+		ctx = SchemaContext(doctypes=("Customer",), reports=("Sales Register",))
+		for tool in BUILTIN_TOOLS:
+			self.assertEqual(arrays_without_items(tool.build_schema(ctx), tool.name), [])
+
+	def test_list_filters_still_validate_after_items(self):
+		schema = Harness().tools()["list_documents"]["inputSchema"]
+		validate_arguments(schema, {"doctype": "Customer", "filters": [["status", "in", ["A", "B"]], ["Customer", "credit", ">", 1.5], ["x", "=", None]]})
+		validate_arguments(schema, {"doctype": "Customer", "filters": {"status": ["between", ["a", "b"]]}})
+		with self.assertRaises(InvalidArguments):
+			validate_arguments(schema, {"doctype": "Customer", "filters": ["status = A"]})
 
 	def test_description_override(self):
 		h = Harness()

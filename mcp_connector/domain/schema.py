@@ -151,9 +151,12 @@ def _validate_property(prop: Any, name: str) -> None:
 	types = prop.get("type")
 	if types is None:
 		raise InvalidArguments(f"{name!r} needs a \"type\"")
-	for t in [types] if isinstance(types, str) else types:
+	types = [types] if isinstance(types, str) else types
+	for t in types:
 		if t not in _TYPES:
 			raise InvalidArguments(f"{name!r} has unknown type {t!r}")
+	if "array" in types and "items" not in prop:
+		raise InvalidArguments(f"{name!r} is an array: describe its elements with \"items\" (ChatGPT refuses arrays without it)")
 	if "enum" in prop and not isinstance(prop["enum"], list):
 		raise InvalidArguments(f"\"enum\" of {name!r} must be a list")
 	if "items" in prop:
