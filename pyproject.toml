@@ -1,7 +1,7 @@
 [project]
 name = "mcp_connector"
 authors = [
-    { name = "Mohammed Ashaibi", email = "mohamed@ashaibi.com", website = "https://ashaibi.com" },
+    { name = "Mohammed Ashaibi", email = "mohamed@ashaibi.com" },
 ]
 description = "Model Context Protocol server for Frappe/ERPNext v14 and v15 with role-based access profiles"
 requires-python = ">=3.10"
@@ -9,6 +9,9 @@ readme = "README.md"
 license = { file = "license.txt" }
 dynamic = ["version"]
 dependencies = []
+
+[project.urls]
+Homepage = "https://ashaibi.com"
 
 [build-system]
 requires = ["flit_core >=3.4,<4"]
